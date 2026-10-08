@@ -1,0 +1,22 @@
+{
+  "platform": "deliveroo",
+  "locale": "ar",
+  "url": "https://deliveroo.ae/ar/menu/Dubai/dubai-business-bay/kamat-dt/?day=today&geohash=thrr3squys8d&time=ASAP",
+  "capturedAt": "2026-10-08T08:40:05.329Z",
+  "scrapeDoOptions": {
+    "render": true,
+    "geoCode": "ae",
+    "waitUntil": "networkidle2",
+    "customWait": 2000,
+    "blockResources": false,
+    "timeout": 90000
+  },
+  "statusCode": 200,
+  "initialStatusCode": 200,
+  "finalUrl": "https://deliveroo.ae/ar/menu/Dubai/dubai-business-bay/kamat-dt/?day=today&geohash=thrr3squys8d&time=ASAP",
+  "requestCost": 5,
+  "remainingCredits": 990,
+  "attempts": 1,
+  "durationMs": 9973,
+  "bytes": 3017876
+}
