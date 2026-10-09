@@ -113,11 +113,24 @@ export function buildItemUpdate(
   setField(u, 'originalPrice', dto.originalPrice);
   setField(u, 'currency', dto.currency);
   setField(u, 'imageUrl', dto.imageUrl);
-  setField(u, 'isAvailable', dto.isAvailable);
+  if (dto.availabilityStatus === 'unknown') {
+    setField(u, 'availabilityStatus', 'unknown');
+    unsetField(u, current, 'isAvailable');
+  } else if (dto.availabilityStatus) {
+    setField(u, 'availabilityStatus', dto.availabilityStatus);
+    setField(u, 'isAvailable', dto.availabilityStatus === 'available');
+  } else {
+    setField(u, 'isAvailable', dto.isAvailable);
+    if (dto.isAvailable !== undefined) unsetField(u, current, 'availabilityStatus');
+    // A listed item with unobserved orderability (Deliveroo DOM fallback only) is stored as
+    // available on first sight; later scrapes that observe availability overwrite it.
+    setOnInsertField(u, 'isAvailable', true);
+  }
   setField(u, 'isPopular', dto.isPopular);
   setField(u, 'dietaryTags', dto.dietaryTags);
   setField(u, 'calories', dto.calories);
   if (dto.modifiers) setField(u, 'modifiers', mergeModifierGroups(existing?.modifiers, dto.modifiers, locale));
+  setField(u, 'hasModifiers', dto.hasModifiers);
   setLocalized(u, 'sourceUrl', locale, dto.sourceUrl);
   setField(u, 'isActive', true);
   setField(u, 'lastSeenAt', now);
@@ -126,9 +139,6 @@ export function buildItemUpdate(
   setField(u, 'updatedAt', now);
 
   setOnInsertField(u, 'dietaryTags', []);
-  // A listed item with unknown orderability (DOM fallback only) is stored as available on first
-  // sight; later scrapes that observe availability overwrite it.
-  setOnInsertField(u, 'isAvailable', true);
   setOnInsertField(u, 'firstSeenAt', now);
   setOnInsertField(u, 'createdAt', now);
 

@@ -1,4 +1,5 @@
 import type {
+  DiningAvailabilityStatus,
   DiningLocale,
   DiningLocation,
   DiningPlatform,
@@ -53,7 +54,7 @@ export interface DiningMenuCategoryDto {
   sortOrder: number;
 }
 
-export type DiningMenuItemClearableField = 'description' | 'originalPrice' | 'imageUrl' | 'isPopular' | 'categoryId';
+export type DiningMenuItemClearableField = 'description' | 'originalPrice' | 'imageUrl' | 'isPopular' | 'categoryId' | 'hasModifiers';
 
 export interface DiningMenuItemDto {
   sourceKey: string;
@@ -68,12 +69,18 @@ export interface DiningMenuItemDto {
   originalPrice?: number;
   currency: string;
   imageUrl?: string;
+  // Without availabilityStatus, the legacy contract applies: an observed isAvailable is stored and
+  // a new item with no observation is stored as available (Deliveroo DOM fallback).
   isAvailable?: boolean;
+  // Explicit status. 'unknown' stores no isAvailable at all and is never defaulted to available.
+  availabilityStatus?: DiningAvailabilityStatus;
   isPopular?: boolean;
   dietaryTags?: string[];
   calories?: number;
   // Single-locale names; persistence merges them with the stored other-locale names.
   modifiers?: MenuModifierGroup[];
+  // The source flags options without (necessarily) exposing them; never implies modifier groups.
+  hasModifiers?: boolean;
   sourceUrl: LocalizedText;
   clear: DiningMenuItemClearableField[];
 }

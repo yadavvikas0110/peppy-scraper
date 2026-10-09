@@ -19,6 +19,9 @@ export interface DeliverooRawLocation {
   country?: string;
   platformCityId?: number;
   platformZoneId?: number;
+  // Restaurant map pin from the info panel. Never the customer's delivery location.
+  lat?: number;
+  lng?: number;
 }
 
 export interface DeliverooRawRestaurant {

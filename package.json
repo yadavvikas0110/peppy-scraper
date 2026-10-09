@@ -13,7 +13,10 @@
     "test:dining": "node --require ts-node/register --test test/dining/*.test.ts test/shared/db/*.test.ts",
     "dining:indexes": "node dist/src/dining/db/dining.ensure-indexes.js",
     "dining:identity-backfill": "node dist/src/dining/identity/identity.backfill.cli.js",
-    "dining:canonical-items-backfill": "node dist/src/dining/canonical-items/canonical-item.backfill.cli.js"
+    "dining:identity-assign": "node dist/src/dining/identity/identity.assign.cli.js",
+    "dining:canonical-items-backfill": "node dist/src/dining/canonical-items/canonical-item.backfill.cli.js",
+    "dining:item-mappings-import": "node dist/src/dining/item-mappings/item-mapping.import.cli.js",
+    "dining:item-mappings-match": "node dist/src/dining/item-mappings/item-mapping.match.cli.js"
   },
   "keywords": [],
   "author": "",

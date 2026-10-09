@@ -26,6 +26,10 @@ export type PerLocale<T> = {
 //   position → 0-based order within the parent (last resort, menu reorders change it)
 export type SourceKeyKind = 'id' | 'anchor' | 'position';
 
+// available / unavailable: the source explicitly says so. unknown: the source does not report it.
+export const DINING_AVAILABILITY_STATUSES = ['available', 'unavailable', 'unknown'] as const;
+export type DiningAvailabilityStatus = (typeof DINING_AVAILABILITY_STATUSES)[number];
+
 // ─── Restaurant ──────────────────────────────────────────────────────────────
 
 export interface DiningLocation {
@@ -137,14 +141,19 @@ export interface DiningMenuItem {
   originalPrice?: number;
   currency: string;
   imageUrl?: string;
-  // Source-reported orderability (e.g. sold out → false).
-  isAvailable: boolean;
-  // Whether the item was present in the latest scrape. Missing items flip to false, never deleted.
+  // Source-reported orderability (e.g. sold out → false). Absent when availabilityStatus is 'unknown'.
+  isAvailable?: boolean;
+  // Only stored when the mapper states it explicitly; absent on legacy documents, whose status is
+  // derived from isAvailable (see resolveAvailabilityStatus).
+  availabilityStatus?: DiningAvailabilityStatus;
+  // Whether the item is listed in the latest scrape. Missing items flip to false, never deleted.
   isActive: boolean;
   isPopular?: boolean;
   dietaryTags: string[];
   calories?: number;
   modifiers?: MenuModifierGroup[];
+  // The source says the item has options, without necessarily exposing them (Talabat `hasChoices`).
+  hasModifiers?: boolean;
   sourceUrl: LocalizedText;
   firstSeenAt: Date;
   lastSeenAt: Date;

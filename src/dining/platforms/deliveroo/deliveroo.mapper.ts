@@ -25,11 +25,12 @@ import type { DeliverooParseResult, DeliverooRawMenuItem, DeliverooRawModifierGr
  *   - Keys come from getDeliverooIdentityInputs() + the source-key helpers; never from names,
  *     descriptions, image URLs or CSS. Items without a usable identity are rejected with a warning.
  *   - Localized fields contain only `result.locale`.
- *   - Cuisine labels and the address are locale-neutral canonical fields but appear as translated
- *     text on the page: they are taken from the reference locale (EN) only.
+ *   - Cuisine labels and the location (address, area, city, map-pin coordinates) are locale-neutral
+ *     canonical fields: they are taken from the reference locale (EN) only, so an AR update never
+ *     touches the stored location.
  *   - Prices are already in major units. `originalPrice` only when a discount exists.
  *   - Not provided because Deliveroo's page does not carry them reliably: delivery time, open/closed
- *     (only a "Closes at" text), lat/lng, exact rating count, brand name, dietary tags, calories.
+ *     (only a "Closes at" text), exact rating count, brand name, dietary tags, calories.
  */
 
 export const DELIVEROO_REFERENCE_LOCALE: DiningLocale = 'en';
@@ -61,7 +62,13 @@ function mapRestaurant(result: DeliverooParseResult, warnings: PlatformParseWarn
 
   const locale = result.locale;
   const isReference = locale === DELIVEROO_REFERENCE_LOCALE;
-  const location: DiningLocation = stripUndefined({ city: r.location.city, area: r.location.area, address: r.location.address });
+  const location: DiningLocation = stripUndefined({
+    city: r.location.city,
+    area: r.location.area,
+    address: r.location.address,
+    lat: r.location.lat,
+    lng: r.location.lng,
+  });
   const ratingCount = r.ratingCountText?.replace(/^\((.*)\)$/, '$1').trim();
 
   if (r.menuDisabled) {

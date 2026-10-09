@@ -1,5 +1,6 @@
 import { ObjectId } from 'mongodb';
 import {
+  DINING_AVAILABILITY_STATUSES,
   DINING_LOCALES,
   SCRAPE_RUN_COUNT_FIELDS,
   SCRAPE_RUN_STATUSES,
@@ -400,6 +401,22 @@ export function validateModifierGroup(group: unknown): ValidationResult {
   return issues.result();
 }
 
+// Legacy documents carry only isAvailable. An explicit status must agree with it, and 'unknown'
+// must not carry an isAvailable value at all.
+function checkAvailability(doc: Record<string, unknown>, issues: Issues): void {
+  const status = doc.availabilityStatus;
+  if (status === undefined) {
+    checkBoolean(doc.isAvailable, 'isAvailable', issues);
+    return;
+  }
+  checkEnum(status, DINING_AVAILABILITY_STATUSES, 'availabilityStatus', issues);
+  if (status === 'unknown') {
+    if (doc.isAvailable !== undefined) issues.add('isAvailable', 'must be absent when availabilityStatus is "unknown"');
+  } else if (status === 'available' || status === 'unavailable') {
+    if (doc.isAvailable !== (status === 'available')) issues.add('isAvailable', `must be ${status === 'available'} when availabilityStatus is "${status}"`);
+  }
+}
+
 export function validateMenuItem(doc: unknown): ValidationResult {
   const issues = new Issues();
   if (!checkRoot(doc, issues)) return issues.result();
@@ -447,11 +464,12 @@ export function validateMenuItem(doc: unknown): ValidationResult {
   }
   checkCurrency(doc.currency, 'currency', issues);
   if (doc.imageUrl !== undefined) checkUrl(doc.imageUrl, 'imageUrl', issues);
-  checkBoolean(doc.isAvailable, 'isAvailable', issues);
+  checkAvailability(doc, issues);
   checkBoolean(doc.isActive, 'isActive', issues);
   checkBoolean(doc.isPopular, 'isPopular', issues, false);
   checkStringArray(doc.dietaryTags, 'dietaryTags', issues);
   checkNumber(doc.calories, 'calories', issues, { integer: true, min: 0 });
+  checkBoolean(doc.hasModifiers, 'hasModifiers', issues, false);
 
   if (doc.modifiers !== undefined) {
     if (!Array.isArray(doc.modifiers)) issues.add('modifiers', 'must be an array');

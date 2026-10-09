@@ -4,7 +4,23 @@ import assert from 'node:assert/strict';
 import { parseDeliverooMenu } from '../../src/dining/platforms/deliveroo/deliveroo.parser';
 import { deliverooMapper, mapDeliverooMenu } from '../../src/dining/platforms/deliveroo/deliveroo.mapper';
 import { DiningMappingError } from '../../src/dining/platforms/platform.mapper';
-import { COCA_COLA, FIXTURE_URL, fixtureHtml, mappedMenu, STUFFED_NAN, THALI, withMenuRoot, withoutNextData } from './helpers';
+import type { DiningLocale, DiningRestaurant } from '../../src/dining/dining.types';
+import { validateRestaurant } from '../../src/dining/dining.validator';
+import { applyUpdate } from '../../src/dining/repositories/document-update';
+import { buildRestaurantUpdate } from '../../src/dining/repositories/restaurant.repository';
+import {
+  COCA_COLA,
+  FIXTURE_URL,
+  fixtureHtml,
+  GOLDEN_MILE_URL,
+  goldenMileFixtureHtml,
+  mappedMenu,
+  STUFFED_NAN,
+  THALI,
+  withMenuRoot,
+  withNextData,
+  withoutNextData,
+} from './helpers';
 
 const EN = mappedMenu('en');
 const AR = mappedMenu('ar');
@@ -24,7 +40,10 @@ describe('Deliveroo mapper — restaurant', () => {
     assert.deepEqual(r.name, { en: 'Kamat Vegetarian - Business Bay' });
     assert.deepEqual(r.url, { en: 'https://deliveroo.ae/en/menu/Dubai/dubai-business-bay/kamat-dt/' });
     assert.deepEqual(r.cuisines, ['Vegetarian', 'Indian', 'South Indian']);
-    assert.deepEqual(r.location, { city: 'dubai', area: 'Dubai Business Bay', address: 'Ground Level, Bay Avenue, Executive Tower G, Dubai' });
+    assert.deepEqual(r.location, {
+      city: 'dubai', area: 'Dubai Business Bay', address: 'Ground Level, Bay Avenue, Executive Tower G, Dubai',
+      lat: 25.189217736842103, lng: 55.26528257142861,
+    });
     assert.equal(r.rating, 4.8);
     assert.equal(r.ratingCountText, '500+');
     assert.equal(r.currency, 'AED');
@@ -45,6 +64,46 @@ describe('Deliveroo mapper — restaurant', () => {
     assert.equal(r.location, undefined);
     assert.equal(r.rating, 4.8);
     assert.equal(r.deliveryFee, 4.95);
+  });
+});
+
+describe('Deliveroo mapper — restaurant coordinates', () => {
+  const ctx = (locale: DiningLocale) => ({ locale, runId: `run_${locale}`, now: new Date('2026-10-09T12:00:00.000Z') });
+  const store = (existing: DiningRestaurant | null, menu: typeof EN) => applyUpdate<DiningRestaurant>(existing, buildRestaurantUpdate(menu.restaurant, ctx(menu.locale)));
+  const withoutMapPin = (page: string) => withNextData(page, d => {
+    for (const g of d.props.initialState.menuPage.menu.layoutGroups) g.layouts = g.layouts.filter((l: any) => l.actionId !== 'layout-list-map');
+  });
+
+  test('Golden Mile: map-pin coordinates reach the canonical location; still no brand name', () => {
+    const gm = mapDeliverooMenu(parseDeliverooMenu(goldenMileFixtureHtml(), { locale: 'en', sourceUrl: GOLDEN_MILE_URL }));
+    assert.equal(gm.restaurant.sourceKey, 'deliveroo:restaurant:id:735078');
+    assert.deepEqual(gm.restaurant.location, { city: 'dubai', area: 'The Palm', address: 'The Palm, Dubai', lat: 25.11087931092437, lng: 55.14177102521007 });
+    assert.equal(gm.restaurant.brandName, undefined);
+    assert.equal(gm.categories.length, 28);
+    assert.equal(gm.items.length, 333);
+    assert.deepEqual(gm.completeness.reasons, ['MENU_DISABLED']);
+  });
+
+  test('no pin on the page → location without coordinates (never 0,0 or guessed)', () => {
+    const r = mappedMenu('en', withoutMapPin(fixtureHtml('en'))).restaurant;
+    assert.deepEqual(r.location, { city: 'dubai', area: 'Dubai Business Bay', address: 'Ground Level, Bay Avenue, Executive Tower G, Dubai' });
+  });
+
+  test('stored document: EN sets coordinates; an AR update (with or without a pin) keeps them', () => {
+    const afterEn = store(null, EN);
+    assert.equal(afterEn.location.lat, 25.189217736842103);
+    assert.equal(afterEn.location.lng, 55.26528257142861);
+    for (const ar of [AR, mappedMenu('ar', withoutMapPin(fixtureHtml('ar')))]) {
+      assert.equal(ar.restaurant.location, undefined);
+      const afterAr = store(afterEn, ar);
+      assert.deepEqual(afterAr.location, afterEn.location);
+      assert.deepEqual(afterAr.name, { en: 'Kamat Vegetarian - Business Bay', ar: 'Kamat Vegetarian - Business Bay' });
+    }
+  });
+
+  test('stored document validates with coordinates', () => {
+    const check = validateRestaurant(store(null, EN));
+    assert.equal(check.valid, true, JSON.stringify(check.issues));
   });
 });
 

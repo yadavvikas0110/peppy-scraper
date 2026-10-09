@@ -42,7 +42,37 @@ export type MatchDecision =
   | { kind: 'match' | 'review'; groupId: ObjectId; method: MatchMethod; confidence: number; evidence: DiningRestaurantMatchEvidence }
   | { kind: 'new'; evidence: DiningRestaurantMatchEvidence };
 
-const HARD_CONFLICTS: MatchConflict[] = ['CITY_MISMATCH', 'AREA_MISMATCH', 'LOCATION_FAR'];
+export const HARD_CONFLICTS: readonly MatchConflict[] = ['CITY_MISMATCH', 'AREA_MISMATCH', 'LOCATION_FAR'];
+
+export interface BranchComparison {
+  signals: MatchSignal[];
+  conflicts: MatchConflict[];
+  distanceMeters?: number;
+}
+
+// Branch (location) evidence only: city, area, address and coordinates. Names and brands are not compared.
+export function compareBranchLocation(source: RestaurantMatchSignals, target: RestaurantMatchSignals): BranchComparison {
+  const out: BranchComparison = { signals: [], conflicts: [] };
+  if (source.city && target.city) {
+    if (source.city === target.city) out.signals.push('CITY_EQUAL');
+    else out.conflicts.push('CITY_MISMATCH');
+  }
+  if (source.area && target.area) {
+    if (areasCompatible(source.area, target.area)) out.signals.push('AREA_COMPATIBLE');
+    else out.conflicts.push('AREA_MISMATCH');
+  }
+  if (source.address && target.address) {
+    if (source.address === target.address) out.signals.push('ADDRESS_EXACT');
+    else out.conflicts.push('ADDRESS_MISMATCH');
+  }
+  if (source.lat !== undefined && source.lng !== undefined && target.lat !== undefined && target.lng !== undefined) {
+    const d = Math.round(distanceMeters({ lat: source.lat, lng: source.lng }, { lat: target.lat, lng: target.lng }));
+    out.distanceMeters = d;
+    if (d <= LOCATION_MATCH_METERS) out.signals.push('LOCATION_NEAR');
+    else if (d > LOCATION_CONFLICT_METERS) out.conflicts.push('LOCATION_FAR');
+  }
+  return out;
+}
 
 export function evaluateCandidate(source: SourceRestaurantSignals, candidate: MatchCandidate): CandidateVerdict {
   const target = candidate.signals;
@@ -56,24 +86,10 @@ export function evaluateCandidate(source: SourceRestaurantSignals, candidate: Ma
   if (brandMatch) signals.push('BRAND_EXACT');
   if (!nameMatch && !brandMatch) return { verdict: 'none', groupId: candidate.groupId, evidence };
 
-  if (source.city && target.city) {
-    if (source.city === target.city) signals.push('CITY_EQUAL');
-    else conflicts.push('CITY_MISMATCH');
-  }
-  if (source.area && target.area) {
-    if (areasCompatible(source.area, target.area)) signals.push('AREA_COMPATIBLE');
-    else conflicts.push('AREA_MISMATCH');
-  }
-  if (source.address && target.address) {
-    if (source.address === target.address) signals.push('ADDRESS_EXACT');
-    else conflicts.push('ADDRESS_MISMATCH');
-  }
-  if (source.lat !== undefined && source.lng !== undefined && target.lat !== undefined && target.lng !== undefined) {
-    const d = Math.round(distanceMeters({ lat: source.lat, lng: source.lng }, { lat: target.lat, lng: target.lng }));
-    evidence.distanceMeters = d;
-    if (d <= LOCATION_MATCH_METERS) signals.push('LOCATION_NEAR');
-    else if (d > LOCATION_CONFLICT_METERS) conflicts.push('LOCATION_FAR');
-  }
+  const branch = compareBranchLocation(source, target);
+  signals.push(...branch.signals);
+  conflicts.push(...branch.conflicts);
+  if (branch.distanceMeters !== undefined) evidence.distanceMeters = branch.distanceMeters;
 
   if (conflicts.some(c => HARD_CONFLICTS.includes(c))) return { verdict: 'none', groupId: candidate.groupId, evidence };
 

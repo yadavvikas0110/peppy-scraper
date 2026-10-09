@@ -10,7 +10,7 @@ const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !
 const isDate = (v: unknown) => v instanceof Date && !Number.isNaN(v.getTime());
 
 // Platform-specific data stays on dining_menu_items.
-const PLATFORM_FIELDS = ['price', 'originalPrice', 'currency', 'imageUrl', 'sourceUrl', 'url', 'platformItemId', 'sourceKey', 'isAvailable', 'isActive', 'modifiers'];
+const PLATFORM_FIELDS = ['price', 'originalPrice', 'currency', 'imageUrl', 'sourceUrl', 'url', 'platformItemId', 'sourceKey', 'isAvailable', 'availabilityStatus', 'isActive', 'modifiers', 'hasModifiers'];
 
 export function canonicalIdentityKey(restaurantGroupId: ObjectId, seedMenuItemId: ObjectId): string {
   return `seed:${restaurantGroupId.toHexString()}:${seedMenuItemId.toHexString()}`;

@@ -3,6 +3,8 @@ import { deliverooAdapter } from './deliveroo/deliveroo.adapter';
 import { deliverooMapper } from './deliveroo/deliveroo.mapper';
 import type { DiningPlatformMapper } from './platform.mapper';
 import type { DiningPlatformAdapter } from './platform.types';
+import { talabatAdapter } from './talabat/talabat.adapter';
+import { talabatMapper } from './talabat/talabat.mapper';
 
 // Platform name → adapter (URLs, fetch options, parsing, identity) + mapper (canonical DTOs).
 // Adding Talabat/Careem means adding an entry here; the orchestration flow does not change.
@@ -15,6 +17,7 @@ export type DiningPlatformRegistry = (platform: string) => DiningPlatformModule 
 
 const MODULES: Partial<Record<DiningPlatform, DiningPlatformModule<any>>> = {
   deliveroo: { adapter: deliverooAdapter, mapper: deliverooMapper },
+  talabat: { adapter: talabatAdapter, mapper: talabatMapper },
 };
 
 export const getDiningPlatformModule: DiningPlatformRegistry = platform =>

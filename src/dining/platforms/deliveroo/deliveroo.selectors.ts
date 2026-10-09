@@ -36,7 +36,12 @@ export const DELIVEROO_CATEGORY_SECTION_ID = /^layout-(\d+)$/;
 export const DELIVEROO_NEXT_DATA_PATHS = {
   menuRoot: ['props', 'initialState', 'menuPage', 'menu', 'metas', 'root'],
   header: ['props', 'initialState', 'menuPage', 'menu', 'header'],
+  layoutGroups: ['props', 'initialState', 'menuPage', 'menu', 'layoutGroups'],
 } as const;
+
+// Restaurant info panel "Location" list: layoutGroups[].layouts[actionId] → blocks[].map.pins[{ lat, lon }].
+// The action ID is locale-neutral (same on the EN and AR fixtures); the visible header is translated.
+export const DELIVEROO_MAP_LAYOUT_ACTION_ID = 'layout-list-map';
 
 // Header info spans carry no semantic ids, only localized text. Patterns observed in the fixtures:
 //   en: "4.8 Excellent" "(500+)" "Closes at 23:00" "AED 20 minimum" "AED 4.95 delivery"

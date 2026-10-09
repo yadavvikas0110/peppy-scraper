@@ -19,6 +19,9 @@ import {
 } from '../../src/dining/platforms/deliveroo/deliveroo.parser';
 import type { DeliverooParseResult } from '../../src/dining/platforms/deliveroo/deliveroo.types';
 import type { PlatformIdentityInputs } from '../../src/dining/platforms/platform.types';
+import { parseTalabatMenu } from '../../src/dining/platforms/talabat/talabat.parser';
+import { distanceMeters } from '../../src/dining/identity/identity.signals';
+import { GOLDEN_MILE_URL, goldenMileFixtureHtml, withNextData } from './helpers';
 
 // All tests use the saved fixtures (captured once with Scrape.do). No network access.
 
@@ -419,6 +422,141 @@ describe('Deliveroo source identity', () => {
     assert.deepEqual(inputs.items, []);
     assert.deepEqual(inputs.unresolvedItemIndexes, [0]);
   });
+});
+
+describe('Deliveroo parser — restaurant coordinates (info panel map pin)', () => {
+  const BUSINESS_BAY_PIN = { lat: 25.189217736842103, lng: 55.26528257142861 };
+  const GOLDEN_MILE_PIN = { lat: 25.11087931092437, lng: 55.14177102521007 };
+  const menuOf = (data: any) => data.props.initialState.menuPage.menu;
+  const mapLayout = (data: any) => menuOf(data).layoutGroups.flatMap((g: any) => g.layouts).find((l: any) => l.actionId === 'layout-list-map');
+  const setPins = (page: string, pins: unknown[]) => withNextData(page, d => { mapLayout(d).blocks[0].map.pins = pins; });
+  const withoutMapLayout = (page: string) => withNextData(page, d => {
+    for (const g of menuOf(d).layoutGroups) g.layouts = g.layouts.filter((l: any) => l.actionId !== 'layout-list-map');
+  });
+  const coordinateWarnings = (r: DeliverooParseResult) => r.warnings.filter(w => /COORDINATES/.test(w.code)).map(w => w.code);
+  const parseGoldenMile = (page = goldenMileFixtureHtml()) => parseDeliverooMenu(page, { locale: 'en', sourceUrl: GOLDEN_MILE_URL });
+
+  test('Business Bay fixture: pin read in EN and AR (locale-neutral), no warnings', () => {
+    assert.equal(EN.restaurant!.location.lat, BUSINESS_BAY_PIN.lat);
+    assert.equal(EN.restaurant!.location.lng, BUSINESS_BAY_PIN.lng);
+    assert.equal(AR.restaurant!.location.lat, BUSINESS_BAY_PIN.lat);
+    assert.equal(AR.restaurant!.location.lng, BUSINESS_BAY_PIN.lng);
+    assert.deepEqual(coordinateWarnings(EN), []);
+    assert.deepEqual(coordinateWarnings(AR), []);
+  });
+
+  test('Golden Mile fixture: source coordinates preserved exactly, menu unchanged', () => {
+    const gm = parseGoldenMile();
+    const r = gm.restaurant!;
+    assert.equal(r.platformRestaurantId, '735078');
+    assert.equal(r.slug, 'kamat-golden-mile-galleria');
+    assert.equal(r.name, 'Kamat Vegetarian - Golden Mile Galleria');
+    assert.deepEqual(r.location, {
+      address: 'The Palm, Dubai', area: 'The Palm', city: 'dubai', country: 'AE',
+      platformCityId: 40, platformZoneId: 308, ...GOLDEN_MILE_PIN,
+    });
+    assert.equal(r.menuDisabled, true);
+    assert.deepEqual(gm.warnings, []);
+    assert.deepEqual(gm.stats, { itemsSeen: 461, itemsParsed: 333, itemsRejected: 0, hiddenOptionItems: 128, modifierGroups: 38 });
+    assert.equal(gm.categories.length, 28);
+    assert.equal(new Set(gm.items.map(i => i.platformItemId)).size, 333);
+  });
+
+  test('Golden Mile pin is ~39 m from the Talabat Palm Jumeirah branch; Business Bay is kilometres away', () => {
+    const talabat = parseTalabatMenu(readFileSync(join(FIXTURES, 'talabat-en.html'), 'utf8'), {
+      locale: 'en', sourceUrl: 'https://www.talabat.com/uae/restaurant/773429/kamat-vegetarian-the-palm-jumeirah?aid=1333',
+    }).restaurant!.location;
+    const palm = { lat: talabat.lat!, lng: talabat.lng! };
+    assert.equal(Math.round(distanceMeters(GOLDEN_MILE_PIN, palm)), 39);
+    assert.ok(distanceMeters(BUSINESS_BAY_PIN, palm) > 10_000);
+  });
+
+  test('missing map layout or pins: no coordinates and no warning', () => {
+    for (const page of [withoutMapLayout(goldenMileFixtureHtml()), setPins(goldenMileFixtureHtml(), []), withNextData(goldenMileFixtureHtml(), d => { delete menuOf(d).layoutGroups; })]) {
+      const r = parseGoldenMile(page);
+      assert.equal(r.restaurant!.location.lat, undefined);
+      assert.equal(r.restaurant!.location.lng, undefined);
+      assert.deepEqual(coordinateWarnings(r), []);
+      assert.equal(r.items.length, 333);
+    }
+  });
+
+  test('malformed pins are rejected with INVALID_COORDINATES, never partially stored', () => {
+    const malformed: unknown[] = [
+      { lat: '25.11', lon: 55.14 },
+      { lat: 25.11 },
+      { lat: 25.11, lng: 55.14 },
+      { lat: 95, lon: 55.14 },
+      { lat: 25.11, lon: 181 },
+      { lat: 0, lon: 0 },
+      { lat: null, lon: null },
+      'not-a-pin',
+    ];
+    for (const pin of malformed) {
+      const r = parseGoldenMile(setPins(goldenMileFixtureHtml(), [pin]));
+      assert.equal(r.restaurant!.location.lat, undefined, JSON.stringify(pin));
+      assert.equal(r.restaurant!.location.lng, undefined, JSON.stringify(pin));
+      assert.deepEqual(coordinateWarnings(r), ['INVALID_COORDINATES'], JSON.stringify(pin));
+    }
+  });
+
+  test('one valid pin among malformed ones is used; duplicates collapse; distinct pins are ambiguous', () => {
+    const mixed = parseGoldenMile(setPins(goldenMileFixtureHtml(), [{ lat: 'x' }, { lat: GOLDEN_MILE_PIN.lat, lon: GOLDEN_MILE_PIN.lng }]));
+    assert.equal(mixed.restaurant!.location.lat, GOLDEN_MILE_PIN.lat);
+    assert.deepEqual(coordinateWarnings(mixed), ['INVALID_COORDINATES']);
+
+    const pin = { lat: GOLDEN_MILE_PIN.lat, lon: GOLDEN_MILE_PIN.lng };
+    const duplicate = parseGoldenMile(setPins(goldenMileFixtureHtml(), [pin, { ...pin }]));
+    assert.equal(duplicate.restaurant!.location.lng, GOLDEN_MILE_PIN.lng);
+    assert.deepEqual(coordinateWarnings(duplicate), []);
+
+    const ambiguous = parseGoldenMile(setPins(goldenMileFixtureHtml(), [pin, { lat: BUSINESS_BAY_PIN.lat, lon: BUSINESS_BAY_PIN.lng }]));
+    assert.equal(ambiguous.restaurant!.location.lat, undefined);
+    assert.deepEqual(coordinateWarnings(ambiguous), ['AMBIGUOUS_COORDINATES']);
+  });
+
+  test('customer location is never used: 0,0 visitor location, address state and home map are ignored', () => {
+    const customerOnly = withNextData(fixtureWithoutPin(), d => {
+      menuOf(d).metas.root.customerLocation = { lat: 25.2, lon: 55.27, city: 'dubai' };
+    });
+    const r1 = parse('en', customerOnly);
+    assert.equal(r1.restaurant!.location.lat, undefined);
+    assert.equal(r1.restaurant!.location.lng, undefined);
+
+    const elsewhere = withNextData(fixtureWithoutPin(), d => {
+      d.props.initialState.address.coordinates = { lat: 25.2, lng: 55.27 };
+      d.props.initialState.home.map.pins = [{ lat: 25.2, lon: 55.27 }];
+      menuOf(d).layoutGroups[1].layouts.push({ typeName: 'UILayoutList', actionId: 'layout-list-description', blocks: [{ map: { pins: [{ lat: 25.2, lon: 55.27 }] } }] });
+    });
+    const r2 = parse('en', elsewhere);
+    assert.equal(r2.restaurant!.location.lat, undefined);
+    assert.equal(r2.restaurant!.location.lng, undefined);
+
+    // Real captures: Business Bay was fetched with a delivery geohash (customer in Downtown), Golden Mile anonymously (0,0).
+    const customerOf = (page: string) => menuOf(JSON.parse(NEXT_DATA_RE.exec(page)![2])).metas.root.customerLocation;
+    const bbCustomer = customerOf(HTML.en);
+    assert.deepEqual([bbCustomer.lat, bbCustomer.lon], [25.2048499, 55.2707799]);
+    assert.notEqual(EN.restaurant!.location.lat, bbCustomer.lat);
+    assert.notEqual(EN.restaurant!.location.lng, bbCustomer.lon);
+    const gmCustomer = customerOf(goldenMileFixtureHtml());
+    assert.deepEqual([gmCustomer.lat, gmCustomer.lon], [0, 0]);
+    assert.notEqual(parseGoldenMile().restaurant!.location.lat, 0);
+  });
+
+  test('a pin identical to the customer location is rejected', () => {
+    const page = withNextData(goldenMileFixtureHtml(), d => {
+      menuOf(d).metas.root.customerLocation = { lat: GOLDEN_MILE_PIN.lat, lon: GOLDEN_MILE_PIN.lng };
+    });
+    const r = parseGoldenMile(page);
+    assert.equal(r.restaurant!.location.lat, undefined);
+    assert.deepEqual(coordinateWarnings(r), ['COORDINATES_MATCH_CUSTOMER_LOCATION']);
+  });
+
+  function fixtureWithoutPin(): string {
+    return withNextData(HTML.en, d => {
+      for (const g of menuOf(d).layoutGroups) g.layouts = g.layouts.filter((l: any) => l.actionId !== 'layout-list-map');
+    });
+  }
 });
 
 describe('Deliveroo parser — purity and helpers', () => {

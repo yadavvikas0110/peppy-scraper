@@ -1,0 +1,34 @@
+{
+  "platform": "deliveroo",
+  "locale": "en",
+  "url": "https://deliveroo.ae/en/menu/dubai/the-palm/kamat-golden-mile-galleria/",
+  "capturedAt": "2026-10-09T11:41:16.156Z",
+  "scrapeDoOptions": {
+    "render": true,
+    "geoCode": "ae",
+    "waitUntil": "networkidle2",
+    "customWait": 2000,
+    "blockResources": false,
+    "timeout": 90000
+  },
+  "statusCode": 200,
+  "finalUrl": "https://deliveroo.ae/en/menu/dubai/the-palm/kamat-golden-mile-galleria",
+  "requestCost": 5,
+  "attempts": 1,
+  "durationMs": 20344,
+  "rawBytes": 3142197,
+  "fixtureBytes": 293308,
+  "sanitized": {
+    "dropped": [
+      "props.initialState (all but menuPage.menu)",
+      "props.sentryContext",
+      "buildId",
+      "runtimeConfig",
+      "menu (all but metas.root, header, layoutGroups)",
+      "metas.root (all but restaurant/customerLocation/categories/items/modifierGroups)",
+      "items (all but parser fields)",
+      "layoutGroups (all but the map layout)",
+      "keys matching token|session|cookie|password|secret|email|ipAddress"
+    ]
+  }
+}

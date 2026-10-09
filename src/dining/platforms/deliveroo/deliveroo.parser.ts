@@ -5,6 +5,7 @@ import {
   DELIVEROO_CATEGORY_SECTION_ID,
   DELIVEROO_HEADER_PATTERNS,
   DELIVEROO_HEADER_SEPARATOR,
+  DELIVEROO_MAP_LAYOUT_ACTION_ID,
   DELIVEROO_NEXT_DATA_PATHS,
   DELIVEROO_RATING,
   DELIVEROO_RATING_COUNT,
@@ -25,7 +26,8 @@ import type {
  *
  * Source priority:
  *   1. script#__NEXT_DATA__ → props.initialState.menuPage.menu.metas.root (restaurant, categories,
- *      items, modifierGroups with Deliveroo IDs, prices in minor units, image URL templates)
+ *      items, modifierGroups with Deliveroo IDs, prices in minor units, image URL templates);
+ *      restaurant coordinates from the info panel map pin in props.initialState.menuPage.menu.layoutGroups
  *   2. Rendered DOM (only if 1 is missing): category sections, item cards, inline background images.
  */
 
@@ -198,7 +200,13 @@ function parseHeader(header: unknown, locale: DiningLocale): HeaderFields {
 
 // ─── __NEXT_DATA__ parsing ───────────────────────────────────────────────────
 
-function readNextData($: CheerioRoot): { root: Obj; header: unknown } | null {
+interface DeliverooNextData {
+  root: Obj;
+  header: unknown;
+  layoutGroups: unknown;
+}
+
+function readNextData($: CheerioRoot): DeliverooNextData | null {
   const raw = $(S.nextData).first().text();
   if (!raw) return null;
   let data: unknown;
@@ -209,7 +217,61 @@ function readNextData($: CheerioRoot): { root: Obj; header: unknown } | null {
   }
   const root = getPath(data, DELIVEROO_NEXT_DATA_PATHS.menuRoot);
   if (!isObj(root) || !Array.isArray(root.items)) return null;
-  return { root, header: getPath(data, DELIVEROO_NEXT_DATA_PATHS.header) };
+  return {
+    root,
+    header: getPath(data, DELIVEROO_NEXT_DATA_PATHS.header),
+    layoutGroups: getPath(data, DELIVEROO_NEXT_DATA_PATHS.layoutGroups),
+  };
+}
+
+function coordinate(value: unknown, limit: number): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value !== 0 && Math.abs(value) <= limit ? value : undefined;
+}
+
+// Restaurant coordinates from the info panel map pin only. `root.customerLocation` (0,0 for an
+// anonymous visitor) and `initialState.address` describe the customer and are never read as a source.
+function readRestaurantPin(
+  layoutGroups: unknown,
+  customerLocation: unknown,
+  warnings: PlatformParseWarning[]
+): { lat?: number; lng?: number } {
+  const rawPins: unknown[] = [];
+  for (const group of Array.isArray(layoutGroups) ? layoutGroups : []) {
+    const layouts = isObj(group) && Array.isArray(group.layouts) ? group.layouts : [];
+    for (const layout of layouts) {
+      if (!isObj(layout) || layout.actionId !== DELIVEROO_MAP_LAYOUT_ACTION_ID) continue;
+      for (const block of Array.isArray(layout.blocks) ? layout.blocks : []) {
+        const pins = getPath(block, ['map', 'pins']);
+        if (Array.isArray(pins)) rawPins.push(...pins);
+      }
+    }
+  }
+  if (rawPins.length === 0) return {};
+
+  const field = 'menu.layoutGroups.map.pins';
+  const valid = new Map<string, { lat: number; lng: number }>();
+  for (const pin of rawPins) {
+    const lat = coordinate(getPath(pin, ['lat']), 90);
+    const lng = coordinate(getPath(pin, ['lon']), 180);
+    if (lat === undefined || lng === undefined) {
+      warnings.push({ scope: 'restaurant', code: 'INVALID_COORDINATES', field, message: 'Map pin has missing or invalid coordinates' });
+      continue;
+    }
+    valid.set(`${lat},${lng}`, { lat, lng });
+  }
+  if (valid.size === 0) return {};
+  if (valid.size > 1) {
+    warnings.push({ scope: 'restaurant', code: 'AMBIGUOUS_COORDINATES', field, message: `Restaurant map has ${valid.size} different pins` });
+    return {};
+  }
+  const pin = [...valid.values()][0];
+  const customerLat = getPath(customerLocation, ['lat']);
+  const customerLng = getPath(customerLocation, ['lon']);
+  if (pin.lat === customerLat && pin.lng === customerLng) {
+    warnings.push({ scope: 'restaurant', code: 'COORDINATES_MATCH_CUSTOMER_LOCATION', field, message: 'Map pin equals the customer location' });
+    return {};
+  }
+  return pin;
 }
 
 function parseModifierGroups(raw: unknown, warnings: PlatformParseWarning[]): Map<string, DeliverooRawModifierGroup> {
@@ -257,7 +319,7 @@ function parseModifierGroups(raw: unknown, warnings: PlatformParseWarning[]): Ma
 
 function parseFromNextData(
   $: CheerioRoot,
-  data: { root: Obj; header: unknown },
+  data: DeliverooNextData,
   ctx: PlatformParseContext,
   result: DeliverooParseResult
 ): void {
@@ -267,6 +329,7 @@ function parseFromNextData(
   // Restaurant
   const r = isObj(root.restaurant) ? root.restaurant : {};
   const address = getPath(r, ['location', 'address']);
+  const pin = readRestaurantPin(data.layoutGroups, root.customerLocation, warnings);
   const headerFields = parseHeader(header, ctx.locale);
   const headerImage = cleanText(getPath(header, ['image', 'url']));
   const image = headerImage ? normalizeDeliverooImageUrl(headerImage) : null;
@@ -292,6 +355,8 @@ function parseFromNextData(
       country: cleanText(getPath(address, ['country'])),
       platformCityId: Number.isInteger(getPath(r, ['location', 'cityId'])) ? (getPath(r, ['location', 'cityId']) as number) : undefined,
       platformZoneId: Number.isInteger(getPath(r, ['location', 'zoneId'])) ? (getPath(r, ['location', 'zoneId']) as number) : undefined,
+      lat: pin.lat,
+      lng: pin.lng,
     },
     menuDisabled: typeof r.menuDisabled === 'boolean' ? r.menuDisabled : undefined,
   };

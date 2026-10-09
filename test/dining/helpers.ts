@@ -25,6 +25,14 @@ export const FIXTURE_URL: Record<DiningLocale, string> = {
   ar: 'https://deliveroo.ae/ar/menu/Dubai/dubai-business-bay/kamat-dt/?day=today&geohash=thrr3squys8d&time=ASAP',
 };
 
+// Second branch (Golden Mile Galleria, The Palm), sanitized with tools/deliveroo-fixture.sanitize.ts.
+export const GOLDEN_MILE_URL = 'https://deliveroo.ae/en/menu/dubai/the-palm/kamat-golden-mile-galleria/';
+let goldenMileHtml: string | undefined;
+
+export function goldenMileFixtureHtml(): string {
+  return (goldenMileHtml ??= readFileSync(join(FIXTURES, 'deliveroo-golden-mile-en.html'), 'utf8'));
+}
+
 export const THALI = '1560778015';
 export const STUFFED_NAN = '1560778003';
 export const COCA_COLA = '1560784058';
@@ -40,6 +48,15 @@ export function withMenuRoot(page: string, mutate: (root: any) => void): string 
   return page.replace(NEXT_DATA_RE, (_m, open, json, close) => {
     const data = JSON.parse(json);
     mutate(data.props.initialState.menuPage.menu.metas.root);
+    return `${open}${JSON.stringify(data).replace(/</g, '\\u003c')}${close}`;
+  });
+}
+
+// Mutates a copy of the whole __NEXT_DATA__ payload (for state outside the menu root).
+export function withNextData(page: string, mutate: (data: any) => void): string {
+  return page.replace(NEXT_DATA_RE, (_m, open, json, close) => {
+    const data = JSON.parse(json);
+    mutate(data);
     return `${open}${JSON.stringify(data).replace(/</g, '\\u003c')}${close}`;
   });
 }

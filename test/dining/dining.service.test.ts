@@ -58,7 +58,7 @@ describe('scrape request validation', () => {
   });
 
   test('unsupported platform and locale have their own codes', () => {
-    const p = validateDiningScrapeRequest(body({ platform: 'talabat' }));
+    const p = validateDiningScrapeRequest(body({ platform: 'careem' }));
     assert.ok(!p.ok && p.code === 'UNSUPPORTED_PLATFORM');
     const l = validateDiningScrapeRequest(body({ locale: 'fr' }));
     assert.ok(!l.ok && l.code === 'UNSUPPORTED_LOCALE');

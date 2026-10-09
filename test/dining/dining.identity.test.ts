@@ -5,6 +5,7 @@ import { ObjectId, WithId } from 'mongodb';
 import { persistMappedMenu } from '../../src/dining/dining.persistence';
 import type { DiningPlatform, DiningRestaurant } from '../../src/dining/dining.types';
 import { backfillRestaurantIdentity } from '../../src/dining/identity/identity.backfill';
+import { assignToAnchorGroup, DiningManualAssignmentError } from '../../src/dining/identity/identity.assign';
 import {
   DINING_IDENTITY_COLLECTIONS,
   DINING_IDENTITY_INDEXES,
@@ -24,10 +25,18 @@ import { extractSourceSignals, normalizeIdentityText, SourceRestaurantSignals } 
 import type { DiningRestaurantMapping } from '../../src/dining/identity/identity.types';
 import { validateRestaurantGroup, validateRestaurantMapping } from '../../src/dining/identity/identity.validator';
 import { DiningIdentityConflictError } from '../../src/dining/identity/restaurant-mapping.repository';
-import { closeTestClient, LOCAL_DB_SKIP, mappedMenu, openTestDb, TestDb } from './helpers';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { parseDeliverooMenu } from '../../src/dining/platforms/deliveroo/deliveroo.parser';
+import { mapDeliverooMenu } from '../../src/dining/platforms/deliveroo/deliveroo.mapper';
+import type { DiningMappedMenu } from '../../src/dining/platforms/platform.mapper';
+import { parseTalabatMenu } from '../../src/dining/platforms/talabat/talabat.parser';
+import { mapTalabatMenu } from '../../src/dining/platforms/talabat/talabat.mapper';
+import { closeTestClient, GOLDEN_MILE_URL, goldenMileFixtureHtml, LOCAL_DB_SKIP, mappedMenu, openTestDb, TestDb } from './helpers';
 
 const KAMAT_NAME = 'Kamat Vegetarian - Business Bay';
 const KAMAT_ADDRESS = 'Ground Level, Bay Avenue, Executive Tower G, Dubai';
+const KAMAT_PIN = { lat: 25.189217736842103, lng: 55.26528257142861 };
 
 // ─── Pure: normalization, matching, validation ───────────────────────────────
 
@@ -96,6 +105,37 @@ describe('identity signals and matcher (pure)', () => {
     assert.equal(validateRestaurantMapping({ ...mapping, canonicalRestaurantGroupId: new ObjectId() }).valid, false);
     assert.equal(validateRestaurantMapping({ ...mapping, matchStatus: 'MATCHED', matchMethod: 'SEED' }).valid, false);
     assert.equal(validateRestaurantMapping({ ...mapping, matchStatus: 'REJECTED', matchMethod: 'MANUAL', canonicalRestaurantGroupId: new ObjectId() }).valid, false);
+  });
+
+  test('Kamat fixtures with map-pin coordinates: Business Bay never matches a Palm listing; Palm pair is never auto-merged', () => {
+    const signalsOf = (menu: DiningMappedMenu) => extractSourceSignals({ ...menu.restaurant, location: menu.restaurant.location ?? {} } as DiningRestaurant);
+    const businessBay = signalsOf(mappedMenu('en'));
+    const goldenMile = signalsOf(mapDeliverooMenu(parseDeliverooMenu(goldenMileFixtureHtml(), { locale: 'en', sourceUrl: GOLDEN_MILE_URL })));
+    const palm = signalsOf(mapTalabatMenu(parseTalabatMenu(readFileSync(join(__dirname, 'fixtures', 'talabat-en.html'), 'utf8'), {
+      locale: 'en', sourceUrl: 'https://www.talabat.com/uae/restaurant/773429/kamat-vegetarian-the-palm-jumeirah?aid=1333',
+    })));
+    assert.ok(businessBay.lat !== undefined && goldenMile.lat !== undefined && palm.lat !== undefined);
+    const group = (s: SourceRestaurantSignals): MatchCandidate => {
+      const { platform, platformRestaurantId: _id, slug: _slug, ...signals } = s;
+      return { groupId: new ObjectId(), signals, matchedPlatforms: [platform] };
+    };
+
+    // As extracted: branch-specific names and no Deliveroo brand → no candidate at all.
+    assert.equal(decideMatch(goldenMile, [group(businessBay), group(palm)]).kind, 'new');
+    assert.equal(decideMatch(palm, [group(businessBay)]).kind, 'new');
+
+    // Even with a shared brand, Business Bay is a hard non-match (area and distance) and the Palm pair only reaches REVIEW.
+    const brands = ['kamat vegetarian'];
+    for (const [a, b] of [[businessBay, palm], [palm, businessBay], [goldenMile, businessBay], [businessBay, goldenMile]]) {
+      const v = evaluateCandidate({ ...a, brands }, group({ ...b, brands }));
+      assert.equal(v.verdict, 'none');
+      assert.ok(v.evidence.conflicts.includes('AREA_MISMATCH'));
+      assert.ok(v.evidence.conflicts.includes('LOCATION_FAR'));
+    }
+    const palmPair = decideMatch({ ...goldenMile, brands }, [group({ ...businessBay, brands }), group({ ...palm, brands })]);
+    assert.equal(palmPair.kind, 'review');
+    assert.equal(palmPair.evidence.distanceMeters, 39);
+    assert.ok(palmPair.evidence.signals.includes('LOCATION_NEAR'));
   });
 });
 
@@ -297,14 +337,18 @@ describe('restaurant identity layer (local MongoDB)', { skip: LOCAL_DB_SKIP }, (
     const kamat = await seedKamat();
     await backfillRestaurantIdentity(repos, { now });
     const group = (await c.restaurantGroups.findOne({}))!;
-    assert.deepEqual(Object.keys(group).sort(), ['_id', 'address', 'area', 'canonicalName', 'city', 'createdAt', 'identityStatus', 'seedRestaurantId', 'signals', 'status', 'updatedAt']);
+    assert.deepEqual(Object.keys(group).sort(), ['_id', 'address', 'area', 'canonicalName', 'city', 'createdAt', 'identityStatus', 'location', 'seedRestaurantId', 'signals', 'status', 'updatedAt']);
     assert.equal(group.city, 'dubai');
     assert.equal(group.area, 'Dubai Business Bay');
     assert.equal(group.address, KAMAT_ADDRESS);
+    assert.deepEqual(group.location, KAMAT_PIN);
     assert.equal(group.status, 'active');
     assert.equal(group.identityStatus, 'auto');
     assert.ok(group.seedRestaurantId!.equals(kamat._id));
-    assert.deepEqual(group.signals, { names: ['kamat vegetarian business bay'], brands: [], city: 'dubai', area: 'dubai business bay', address: 'ground level bay avenue executive tower g dubai' });
+    assert.deepEqual(group.signals, {
+      names: ['kamat vegetarian business bay'], brands: [], city: 'dubai', area: 'dubai business bay',
+      address: 'ground level bay avenue executive tower g dubai', ...KAMAT_PIN,
+    });
 
     const again = await repos.groups.createFromSeed(buildGroupFromRestaurant(kamat, extractSourceSignals(kamat), now));
     assert.equal(again.created, false);
@@ -364,5 +408,126 @@ describe('restaurant identity layer (local MongoDB)', { skip: LOCAL_DB_SKIP }, (
     assert.equal(current.matchStatus, 'MATCHED');
     assert.ok(!current.canonicalRestaurantGroupId!.equals(review.canonicalRestaurantGroupId!));
     assert.equal(after.groupsCreated, 1);
+  });
+
+  describe('manual same-branch assignment (assignToAnchorGroup)', () => {
+    const PALM_NOTE = 'Same branch: Deliveroo info-panel phone +97145528606 = Kamat Palm Jumeirah (Golden Mile Galleria, Building 8)';
+
+    // Mirrors the live state: Talabat-only backfill applied, Deliveroo listings not yet mapped.
+    async function seedPalm() {
+      const businessBay = await seedKamat();
+      const palm = await addRestaurant('talabat', '773429', 'Kamat Vegetarian, The Palm Jumeirah',
+        { city: 'Dubai', area: 'The Palm Jumeirah', lat: 25.111222348578067, lng: 55.141854912966906 }, { brandName: { en: 'Kamat Vegetarian' } });
+      const goldenMile = await addRestaurant('deliveroo', '735078', 'Kamat Vegetarian - Golden Mile Galleria',
+        { city: 'dubai', area: 'The Palm', address: 'The Palm, Dubai', lat: 25.11087931092437, lng: 55.14177102521007 });
+      await backfillRestaurantIdentity(repos, { platform: 'talabat', now });
+      const groupId = (await repos.mappings.findActiveByRestaurant(palm._id))!.canonicalRestaurantGroupId!;
+      return { businessBay, palm, goldenMile, groupId };
+    }
+
+    const snapshot = async () => ({
+      groups: await c.restaurantGroups.find().sort({ _id: 1 }).toArray(),
+      mappings: await c.restaurantMappings.find().sort({ _id: 1 }).toArray(),
+    });
+
+    const refused = (code: string) => (e: unknown) => e instanceof DiningManualAssignmentError && e.code === code;
+
+    test('dry run (default): Golden Mile → Talabat Palm group as MANUAL, confidence 1, auditable evidence; nothing written', async () => {
+      const { palm, goldenMile, groupId } = await seedPalm();
+      const before = await snapshot();
+      const report = await assignToAnchorGroup(repos, { restaurantId: goldenMile._id, anchorRestaurantId: palm._id, note: PALM_NOTE, now });
+
+      assert.equal(report.dryRun, true);
+      assert.equal(report.groupId, groupId.toHexString());
+      assert.deepEqual(report.membersBefore.map(m => `${m.platform}:${m.platformRestaurantId}`), ['talabat:773429']);
+      assert.deepEqual(report.evidence, { signals: ['CITY_EQUAL', 'AREA_COMPATIBLE', 'LOCATION_NEAR'], conflicts: [], distanceMeters: 39 });
+      assert.equal(report.result.status, 'created');
+      const m = report.result.mapping;
+      assert.equal(m._id, undefined);
+      assert.ok(m.canonicalRestaurantGroupId!.equals(groupId));
+      assert.ok(m.restaurantId.equals(goldenMile._id));
+      assert.deepEqual([m.platform, m.platformRestaurantId, m.matchStatus, m.matchMethod, m.confidence, m.decidedBy, m.isActive], ['deliveroo', '735078', 'MATCHED', 'MANUAL', 1, 'manual', true]);
+      assert.equal(m.evidence.reason, 'MANUAL_ASSIGNMENT');
+      assert.equal(m.evidence.distanceMeters, 39);
+      assert.equal(m.evidence.note, `${PALM_NOTE} | computed: deliveroo:735078 vs talabat:773429: 39 m apart; CITY_EQUAL, AREA_COMPATIBLE, LOCATION_NEAR`);
+      assert.deepEqual(await snapshot(), before);
+    });
+
+    test('apply needs the reviewed group ID; then writes once and is idempotent; Business Bay stays out', async () => {
+      const { businessBay, palm, goldenMile, groupId } = await seedPalm();
+      const base = { restaurantId: goldenMile._id, anchorRestaurantId: palm._id, note: PALM_NOTE, dryRun: false, now };
+      await assert.rejects(assignToAnchorGroup(repos, base), refused('GROUP_MISMATCH'));
+      await assert.rejects(assignToAnchorGroup(repos, { ...base, expectedGroupId: new ObjectId() }), refused('GROUP_MISMATCH'));
+      assert.deepEqual(await counts(), { groups: 1, mappings: 1, active: 1 });
+
+      const applied = await assignToAnchorGroup(repos, { ...base, expectedGroupId: groupId });
+      assert.equal(applied.result.status, 'created');
+      assert.ok(applied.result.mapping._id);
+      const again = await assignToAnchorGroup(repos, { ...base, expectedGroupId: groupId });
+      assert.equal(again.result.status, 'unchanged');
+      assert.deepEqual(await counts(), { groups: 1, mappings: 2, active: 2 });
+
+      const members = await repos.mappings.findActiveByGroup(groupId);
+      assert.deepEqual(members.map(x => `${x.platform}:${x.platformRestaurantId}:${x.matchMethod}`), ['deliveroo:735078:MANUAL', 'talabat:773429:SEED']);
+      assert.equal((await repos.groups.findById(groupId))!.identityStatus, 'verified');
+      assert.equal(await repos.mappings.findActiveByRestaurant(businessBay._id), null);
+
+      // The full backfill afterwards leaves both Palm listings alone and gives Business Bay its own group.
+      const full = await backfillRestaurantIdentity(repos, { now });
+      const bb = (await repos.mappings.findActiveByRestaurant(businessBay._id))!;
+      assert.equal(full.groupsCreated, 1);
+      assert.ok(!bb.canonicalRestaurantGroupId!.equals(groupId));
+      assert.deepEqual(await counts(), { groups: 2, mappings: 3, active: 3 });
+    });
+
+    test('Business Bay is refused as a different branch (area and distance), dry run or apply', async () => {
+      const { businessBay, palm, goldenMile, groupId } = await seedPalm();
+      await assignToAnchorGroup(repos, { restaurantId: goldenMile._id, anchorRestaurantId: palm._id, note: PALM_NOTE, dryRun: false, expectedGroupId: groupId, now });
+      const before = await snapshot();
+      for (const anchor of [palm, goldenMile]) {
+        for (const dryRun of [true, false]) {
+          await assert.rejects(
+            assignToAnchorGroup(repos, { restaurantId: businessBay._id, anchorRestaurantId: anchor._id, note: 'test', dryRun, expectedGroupId: groupId, now }),
+            (e: unknown) => refused('BRANCH_CONFLICT')(e) && /AREA_MISMATCH/.test((e as Error).message) && /LOCATION_FAR/.test((e as Error).message)
+          );
+        }
+      }
+      assert.deepEqual(await snapshot(), before);
+    });
+
+    test('an existing active mapping is never replaced implicitly, and never duplicated', async () => {
+      const { palm, goldenMile, groupId } = await seedPalm();
+      await backfillRestaurantIdentity(repos, { restaurantIds: [goldenMile._id], now });
+      const own = (await repos.mappings.findActiveByRestaurant(goldenMile._id))!;
+      assert.ok(!own.canonicalRestaurantGroupId!.equals(groupId));
+      const before = await snapshot();
+
+      const input = { restaurantId: goldenMile._id, anchorRestaurantId: palm._id, note: PALM_NOTE, now };
+      await assert.rejects(assignToAnchorGroup(repos, input), (e: unknown) => e instanceof DiningIdentityConflictError && e.code === 'RESTAURANT_ALREADY_MAPPED');
+      await assert.rejects(assignToAnchorGroup(repos, { ...input, dryRun: false, expectedGroupId: groupId }), DiningIdentityConflictError);
+      const planned = await assignToAnchorGroup(repos, { ...input, replaceExisting: true });
+      assert.equal(planned.result.status, 'created');
+      assert.ok(planned.result.previousGroupId!.equals(own.canonicalRestaurantGroupId!));
+      assert.deepEqual(await snapshot(), before);
+
+      await assignToAnchorGroup(repos, { ...input, replaceExisting: true, dryRun: false, expectedGroupId: groupId });
+      const rows = await c.restaurantMappings.find({ restaurantId: goldenMile._id }).sort({ isActive: 1 }).toArray();
+      assert.deepEqual(rows.map(r => [r.matchStatus, r.isActive, r.evidence.reason]), [['REJECTED', false, 'REASSIGNED'], ['MATCHED', true, 'MANUAL_ASSIGNMENT']]);
+    });
+
+    test('refusals: weak evidence, second listing of a platform, unmapped anchor, missing or oversized note', async () => {
+      const { palm, goldenMile, groupId } = await seedPalm();
+      const sameArea = await addRestaurant('deliveroo', '900001', 'Kamat Palm (no coordinates)', { city: 'dubai', area: 'The Palm' });
+      await assert.rejects(assignToAnchorGroup(repos, { restaurantId: sameArea._id, anchorRestaurantId: palm._id, note: 'x', now }), refused('WEAK_BRANCH_EVIDENCE'));
+
+      await assignToAnchorGroup(repos, { restaurantId: goldenMile._id, anchorRestaurantId: palm._id, note: PALM_NOTE, dryRun: false, expectedGroupId: groupId, now });
+      const twin = await addRestaurant('deliveroo', '900002', 'Kamat twin listing', { city: 'dubai', area: 'The Palm', lat: 25.11088, lng: 55.14177 });
+      await assert.rejects(assignToAnchorGroup(repos, { restaurantId: twin._id, anchorRestaurantId: palm._id, note: 'x', now }), refused('SAME_PLATFORM_IN_GROUP'));
+
+      await assert.rejects(assignToAnchorGroup(repos, { restaurantId: palm._id, anchorRestaurantId: twin._id, note: 'x', now }), refused('ANCHOR_NOT_MAPPED'));
+      await assert.rejects(assignToAnchorGroup(repos, { restaurantId: palm._id, anchorRestaurantId: palm._id, note: 'x', now }), refused('SAME_RESTAURANT'));
+      await assert.rejects(assignToAnchorGroup(repos, { restaurantId: goldenMile._id, anchorRestaurantId: palm._id, note: '  ', now }), refused('NOTE_REQUIRED'));
+      await assert.rejects(assignToAnchorGroup(repos, { restaurantId: goldenMile._id, anchorRestaurantId: palm._id, note: 'x'.repeat(450), now }), refused('NOTE_TOO_LONG'));
+    });
   });
 });

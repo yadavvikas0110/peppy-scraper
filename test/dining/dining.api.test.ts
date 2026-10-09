@@ -115,7 +115,7 @@ describe('POST /api/dining/scrape — HTTP layer (fake service)', () => {
   });
 
   test('4. unsupported platform → 400 UNSUPPORTED_PLATFORM', async () => {
-    const res = await post(server.url, { ...validBody, platform: 'talabat' });
+    const res = await post(server.url, { ...validBody, platform: 'careem' });
     assert.equal(res.status, 400);
     assert.equal(res.body.error.code, 'UNSUPPORTED_PLATFORM');
   });

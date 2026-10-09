@@ -3,7 +3,9 @@ import { stripUndefined } from '../dining.object';
 import type { DiningRestaurant, LocalizedText } from '../dining.types';
 import type { DiningIdentityCollections } from './identity.collections';
 import { SourceRestaurantSignals, toGroupSignals, extractSourceSignals } from './identity.signals';
-import type { DiningRestaurantMapping } from './identity.types';
+import { assertValid } from '../dining.validator';
+import type { DiningRestaurantMapping, DiningRestaurantMatchEvidence } from './identity.types';
+import { validateRestaurantMapping } from './identity.validator';
 import { createRestaurantGroupRepository, RestaurantGroupRepository, SeededGroup } from './restaurant-group.repository';
 import { createRestaurantMappingRepository, DiningIdentityConflictError, RestaurantMappingRepository } from './restaurant-mapping.repository';
 
@@ -68,12 +70,18 @@ export interface AssignRestaurantInput {
   note?: string;
   // Move a restaurant that is MATCHED/REVIEW to another group. The old mapping becomes REJECTED.
   replaceExisting?: boolean;
+  // Branch evidence computed by the caller (recorded alongside the reviewer's note).
+  evidence?: Pick<DiningRestaurantMatchEvidence, 'signals' | 'conflicts' | 'distanceMeters'>;
+  // Decide and validate exactly as for a write, but write nothing.
+  dryRun?: boolean;
 }
 
 export interface AssignRestaurantResult {
   status: 'created' | 'updated' | 'unchanged';
-  mapping: WithId<DiningRestaurantMapping>;
+  // Without `_id` only in a dry run that would insert a new mapping.
+  mapping: DiningRestaurantMapping;
   previousGroupId?: ObjectId;
+  dryRun: boolean;
 }
 
 // Manual decision: confirms (or moves) a source restaurant into a canonical group.
@@ -82,6 +90,7 @@ export async function assignRestaurantToGroup(
   input: AssignRestaurantInput,
   now = new Date()
 ): Promise<AssignRestaurantResult> {
+  const dryRun = input.dryRun === true;
   const restaurant = await repos.restaurants.findOne({ _id: input.restaurantId });
   if (!restaurant) throw new DiningIdentityNotFoundError('RESTAURANT_NOT_FOUND', 'Source restaurant not found');
   const group = await repos.groups.findById(input.groupId);
@@ -96,7 +105,13 @@ export async function assignRestaurantToGroup(
     matchStatus: 'MATCHED',
     matchMethod: 'MANUAL',
     confidence: 1,
-    evidence: { signals: [], conflicts: [], reason: 'MANUAL_ASSIGNMENT', note: clean(input.note) },
+    evidence: {
+      signals: [...(input.evidence?.signals ?? [])],
+      conflicts: [...(input.evidence?.conflicts ?? [])],
+      distanceMeters: input.evidence?.distanceMeters,
+      reason: 'MANUAL_ASSIGNMENT',
+      note: clean(input.note),
+    },
     isActive: true,
     decidedBy: 'manual',
     createdAt: now,
@@ -104,15 +119,18 @@ export async function assignRestaurantToGroup(
   }) as DiningRestaurantMapping;
 
   const active = await repos.mappings.findActiveByRestaurant(restaurant._id);
+  const insert = (m: DiningRestaurantMapping) => (dryRun ? planned(m) : repos.mappings.insert(m));
+  const replace = (prev: WithId<DiningRestaurantMapping>, m: DiningRestaurantMapping) =>
+    dryRun ? planned({ ...m, _id: prev._id, restaurantId: prev.restaurantId, createdAt: prev.createdAt }) : repos.mappings.replace(prev, m);
   let result: AssignRestaurantResult;
 
   if (!active) {
-    result = { status: 'created', mapping: await repos.mappings.insert(next) };
+    result = { status: 'created', mapping: await insert(next), dryRun };
   } else if (active.canonicalRestaurantGroupId?.equals(group._id)) {
-    if (active.matchStatus === 'MATCHED' && active.decidedBy === 'manual') return { status: 'unchanged', mapping: active };
-    result = { status: 'updated', mapping: await repos.mappings.replace(active, next) };
+    if (active.matchStatus === 'MATCHED' && active.decidedBy === 'manual') return { status: 'unchanged', mapping: active, dryRun };
+    result = { status: 'updated', mapping: await replace(active, next), dryRun };
   } else if (active.matchStatus === 'UNMATCHED') {
-    result = { status: 'updated', mapping: await repos.mappings.replace(active, next) };
+    result = { status: 'updated', mapping: await replace(active, next), dryRun };
   } else {
     if (!input.replaceExisting) {
       throw new DiningIdentityConflictError(
@@ -122,13 +140,19 @@ export async function assignRestaurantToGroup(
         active.canonicalRestaurantGroupId
       );
     }
-    await repos.mappings.replace(active, rejected(active, 'REASSIGNED', input.note, now));
-    result = { status: 'created', mapping: await repos.mappings.insert(next), previousGroupId: active.canonicalRestaurantGroupId };
+    await replace(active, rejected(active, 'REASSIGNED', input.note, now));
+    result = { status: 'created', mapping: await insert(next), previousGroupId: active.canonicalRestaurantGroupId, dryRun };
   }
 
+  if (dryRun) return result;
   await repos.groups.addMatchedSignals(group._id, toGroupSignals(extractSourceSignals(restaurant)), now);
   await repos.groups.markVerified(group._id, now);
   return result;
+}
+
+async function planned(mapping: DiningRestaurantMapping): Promise<DiningRestaurantMapping> {
+  assertValid(validateRestaurantMapping(mapping), 'restaurant mapping');
+  return mapping;
 }
 
 function rejected(mapping: WithId<DiningRestaurantMapping>, reason: string, note: string | undefined, now: Date): DiningRestaurantMapping {

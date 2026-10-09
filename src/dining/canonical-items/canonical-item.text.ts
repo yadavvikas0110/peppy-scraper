@@ -118,6 +118,15 @@ function parseVariant(name: string): ParsedVariant | undefined {
   return undefined;
 }
 
+const QUANTITY_RE_ALL = new RegExp(QUANTITY_RE.source, 'giu');
+const SIZE_RE_ALL = new RegExp(SIZE_RE.source, 'giu');
+
+// Name without its portion/size text ("Plain Dosa (2 Pcs)" → "plain dosa"), normalized.
+export function normalizeCoreName(name: string | undefined): string | undefined {
+  if (typeof name !== 'string') return undefined;
+  return normalizeItemText(westernDigits(name).replace(QUANTITY_RE_ALL, ' ').replace(SIZE_RE_ALL, ' '));
+}
+
 export function extractVariant(names: LocalizedText): CanonicalItemVariant | undefined {
   const en = names.en ? parseVariant(names.en) : undefined;
   const ar = names.ar ? parseVariant(names.ar) : undefined;
