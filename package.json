@@ -16,7 +16,9 @@
     "dining:identity-assign": "node dist/src/dining/identity/identity.assign.cli.js",
     "dining:canonical-items-backfill": "node dist/src/dining/canonical-items/canonical-item.backfill.cli.js",
     "dining:item-mappings-import": "node dist/src/dining/item-mappings/item-mapping.import.cli.js",
-    "dining:item-mappings-match": "node dist/src/dining/item-mappings/item-mapping.match.cli.js"
+    "dining:item-mappings-match": "node dist/src/dining/item-mappings/item-mapping.match.cli.js",
+    "dining:item-mappings-approve": "node dist/src/dining/item-mappings/item-mapping.approve.cli.js",
+    "dining:item-mappings-decide": "node dist/src/dining/item-mappings/item-mapping.decisions.cli.js"
   },
   "keywords": [],
   "author": "",

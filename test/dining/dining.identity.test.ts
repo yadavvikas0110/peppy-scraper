@@ -21,7 +21,7 @@ import {
   DiningIdentityRepositories,
   rejectRestaurantMapping,
 } from '../../src/dining/identity/identity.service';
-import { extractSourceSignals, normalizeIdentityText, SourceRestaurantSignals } from '../../src/dining/identity/identity.signals';
+import { areasCompatible, extractSourceSignals, normalizeIdentityText, SourceRestaurantSignals } from '../../src/dining/identity/identity.signals';
 import type { DiningRestaurantMapping } from '../../src/dining/identity/identity.types';
 import { validateRestaurantGroup, validateRestaurantMapping } from '../../src/dining/identity/identity.validator';
 import { DiningIdentityConflictError } from '../../src/dining/identity/restaurant-mapping.repository';
@@ -68,6 +68,33 @@ describe('identity signals and matcher (pure)', () => {
     const far = evaluateCandidate(source({ lat: 25.187, lng: 55.262 }), candidate({ lat: 25.07, lng: 55.14 }));
     assert.equal(far.verdict, 'none');
     assert.ok(far.evidence.conflicts.includes('LOCATION_FAR'));
+  });
+
+  test('area compatibility: whole-word containment plus the explicit platform naming differences only', () => {
+    assert.equal(areasCompatible('dubai business bay', 'business bay'), true);
+    assert.equal(areasCompatible('karama', 'al karama'), true);
+    // Talabat spelling vs Deliveroo spelling of the same mall/area.
+    assert.equal(areasCompatible('ibn batutta mall', 'ibn battuta'), true);
+    assert.equal(areasCompatible('ibn battuta', 'ibn batutta mall'), true);
+    // City Walk lies inside the Al Wasl district, in either direction.
+    assert.equal(areasCompatible('al wasl', 'city walk'), true);
+    assert.equal(areasCompatible('city walk', 'al wasl'), true);
+    // Nothing else is widened: neighbouring or unrelated areas still conflict.
+    assert.equal(areasCompatible('al wasl', 'business bay'), false);
+    assert.equal(areasCompatible('city walk', 'jumeirah 1'), false);
+    assert.equal(areasCompatible('jumeirah 1', 'dubai design district'), false);
+    assert.equal(areasCompatible('batutta', 'ibn battuta'), false);
+    assert.equal(areasCompatible('walk', 'al wasl'), false);
+  });
+
+  test('the area equivalences never override distance: a far City Walk / Al Wasl pair is still LOCATION_FAR', () => {
+    const near = evaluateCandidate(source({ area: 'al wasl', lat: 25.206491, lng: 55.263174 }), candidate({ area: 'city walk', lat: 25.2064375, lng: 55.2631875 }));
+    assert.equal(near.verdict, 'match');
+    assert.deepEqual(near.evidence.conflicts, []);
+    assert.ok(near.evidence.signals.includes('AREA_COMPATIBLE') && near.evidence.signals.includes('LOCATION_NEAR'));
+    const far = evaluateCandidate(source({ area: 'al wasl', lat: 25.2, lng: 55.25 }), candidate({ area: 'city walk', lat: 25.2064375, lng: 55.2631875 }));
+    assert.equal(far.verdict, 'none');
+    assert.deepEqual(far.evidence.conflicts, ['LOCATION_FAR']);
   });
 
   test('name + exact address or near coordinates → MATCHED', () => {

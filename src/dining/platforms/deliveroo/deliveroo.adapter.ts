@@ -115,6 +115,7 @@ export const deliverooAdapter: DiningPlatformAdapter<DeliverooParseResult> = {
   getFetchOptions: getDeliverooFetchOptions,
   parse: (html: string, context: PlatformParseContext) => parseDeliverooMenu(html, context),
   getIdentityInputs: getDeliverooIdentityInputs,
+  getAlternateUrls: result => result.restaurant?.alternateUrls ?? {},
 };
 
 // ─── Fetch (one Scrape.do request per call) ──────────────────────────────────

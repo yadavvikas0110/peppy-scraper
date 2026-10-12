@@ -16,7 +16,8 @@ import type {
  *
  * Source: script#__NEXT_DATA__ → props.pageProps.initialMenuState
  *   restaurant  branch/brand IDs, names, cuisines, rating, coordinates, images
- *   area        delivery area + city (localized)
+ *               restaurant.areaName is the branch's own area
+ *   area        delivery area chosen by the URL `aid` + city (localized; not branch evidence)
  *   currentCountry.currencyISO
  *   menuData.categories[]  sections in display order, each with its items
  *     (prices in major units, oldPrice -1 = no discount, originalImage, hasChoices)
@@ -202,7 +203,8 @@ function parseRestaurant(
   const rating = parseTalabatNumber(r.rate);
   const ratingCount = parseTalabatNumber(r.totalRatings);
   const location: TalabatRawLocation = {
-    area: cleanText(area.name) ?? cleanText(r.areaName),
+    area: cleanText(r.areaName),
+    deliveryArea: cleanText(area.name),
     city: cleanText(area.cityName),
     platformAreaId: Number.isSafeInteger(area.id) ? (area.id as number) : undefined,
     platformCityId: Number.isSafeInteger(area.cityId) ? (area.cityId as number) : undefined,

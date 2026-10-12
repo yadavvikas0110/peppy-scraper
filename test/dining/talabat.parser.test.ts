@@ -141,7 +141,9 @@ describe('Talabat parser — English fixture', () => {
     assert.deepEqual(r.cuisineIds, ['171', '104', '385', '1130', '1167', '1169', '2013']);
     assert.equal(r.rating, 4.9);
     assert.equal(r.ratingCount, 500);
-    assert.deepEqual(r.location, { area: 'The Palm Jumeirah', city: 'Dubai', platformAreaId: 1333, platformCityId: 35, lat: 25.111222348578067, lng: 55.141854912966906 });
+    assert.deepEqual(r.location, {
+      area: 'The Palm Jumeirah', deliveryArea: 'The Palm Jumeirah', city: 'Dubai', platformAreaId: 1333, platformCityId: 35, lat: 25.111222348578067, lng: 55.141854912966906,
+    });
     assert.equal(r.imageUrl, 'https://talabat.dhmedia.io/image/talabat/restaurants/KAMAT_1638350200016715497.jpg');
     assert.match(r.logoUrl!, /^https:\/\/talabat\.dhmedia\.io\/image\/talabat\/restaurants\/logo2_\d+\.jpg$/);
     // Address-dependent placeholders are kept raw only.
@@ -203,7 +205,9 @@ describe('Talabat parser — Arabic fixture', () => {
     assert.equal(r.url, URLS.ar);
     assert.equal(r.cuisines[1], 'هندي');
     assert.deepEqual(r.cuisineIds, EN.restaurant!.cuisineIds);
-    assert.equal(r.location.area, 'نخلة الجميرا');
+    // The branch area is not localized by Talabat; the delivery area is.
+    assert.equal(r.location.area, 'The Palm Jumeirah');
+    assert.equal(r.location.deliveryArea, 'نخلة الجميرا');
     assert.equal(r.location.city, 'دبي');
 
     assert.deepEqual(AR.categories.map(c => c.platformCategoryId), EN.categories.map(c => c.platformCategoryId));
@@ -341,6 +345,23 @@ describe('Talabat parser — missing and malformed fields', () => {
     assert.ok(codes(mismatch).includes('RESTAURANT_ID_MISMATCH'));
     // The chain-level ID is never promoted to the branch identity.
     assert.equal(anchorOnly.restaurant!.platformBrandId, '2699');
+  });
+
+  test('location area is the branch area, never the delivery area chosen by the URL aid', () => {
+    // Shape of the McDonald's Mercato Mall page opened with aid=4577 (delivery to Dubai Design District).
+    const page = withMenuState(HTML.en, s => {
+      s.restaurant.areaName = 'Jumeirah 1';
+      s.area.name = 'Dubai Design District';
+      s.area.id = 4577;
+    });
+    const location = parse('en', page).restaurant!.location;
+    assert.equal(location.area, 'Jumeirah 1');
+    assert.equal(location.deliveryArea, 'Dubai Design District');
+    assert.equal(location.platformAreaId, 4577);
+
+    const noBranchArea = parse('en', withMenuState(HTML.en, s => { delete s.restaurant.areaName; }));
+    assert.equal(noBranchArea.restaurant!.location.area, undefined);
+    assert.equal(getDiningPlatformModule('talabat')!.mapper.map(noBranchArea).restaurant.location?.area, undefined);
   });
 
   test('items listed outside every section are reported, not silently dropped', () => {

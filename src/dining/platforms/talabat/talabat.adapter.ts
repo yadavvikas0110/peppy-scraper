@@ -108,6 +108,7 @@ export const talabatAdapter: DiningPlatformAdapter<TalabatParseResult> = {
   getFetchOptions: getTalabatFetchOptions,
   parse: (html: string, context: PlatformParseContext) => parseTalabatMenu(html, context),
   getIdentityInputs: getTalabatIdentityInputs,
+  getAlternateUrls: result => result.restaurant?.alternateUrls ?? {},
 };
 
 // ─── Fetch (one Scrape.do request per call; parse only, never persists) ─────

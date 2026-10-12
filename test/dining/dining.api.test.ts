@@ -34,6 +34,7 @@ function fakeResult(request: DiningScrapeRequest): DiningScrapeResult {
   return {
     runId: 'run_fake_0001', platform: request.platform, locale: request.locale, targetUrl: request.targetUrl,
     status: 'succeeded', dryRun: request.dryRun, restaurantId: 'abc',
+    source: { platformRestaurantId: '76728', alternateUrls: {}, categories: 28, distinctItems: 332 },
     counts: { ...emptyScrapeRunCounts(), restaurantsCreated: 1, categoriesCreated: 28, itemsSeen: 332, itemsCreated: 332 },
     fetch: { statusCode: 200, requestCost: 5, remainingCredits: 990, attempts: 1 },
     durationMs: 1500,

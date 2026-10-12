@@ -46,4 +46,6 @@ export interface DiningPlatformAdapter<TParseResult> {
   getFetchOptions(url: string, locale: DiningLocale): ScrapeDoRequestOptions;
   parse(html: string, context: PlatformParseContext): TParseResult;
   getIdentityInputs(result: TParseResult): PlatformIdentityInputs;
+  // The page's own hreflang alternates (e.g. the verified Arabic URL of an English page).
+  getAlternateUrls?(result: TParseResult): Partial<Record<DiningLocale, string>>;
 }

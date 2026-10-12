@@ -2,10 +2,12 @@ import type { ScrapeDoClient } from '../shared/scrapedo/scrapedo.client';
 import { isScrapeDoError } from '../shared/scrapedo/scrapedo.errors';
 import type { ScrapeDoResponse } from '../shared/scrapedo/scrapedo.types';
 import { redactMongoUri } from '../shared/db/mongo';
+import { stripUndefined } from './dining.object';
 import { DiningRepositories, InactiveDecision, persistMappedMenu } from './dining.persistence';
 import {
   DINING_LOCALES,
   DiningLocale,
+  DiningLocation,
   DiningPlatform,
   DiningScrapeRunCounts,
   DiningScrapeRunError,
@@ -151,6 +153,17 @@ export interface DiningScrapeContext {
   allowDeactivation?: boolean;
 }
 
+// What the fetched page identifies itself as, so a dry run can verify the branch before an import.
+export interface DiningScrapeSourceSummary {
+  platformRestaurantId?: string;
+  name?: string;
+  location?: DiningLocation;
+  // hreflang alternates that belong to the same platform (never guessed from the request URL).
+  alternateUrls: Partial<Record<DiningLocale, string>>;
+  categories: number;
+  distinctItems: number;
+}
+
 export interface DiningScrapeResult {
   runId: string;
   platform: DiningPlatform;
@@ -160,6 +173,7 @@ export interface DiningScrapeResult {
   dryRun: boolean;
   // Undefined for a dry run of a restaurant that is not stored yet.
   restaurantId?: string;
+  source: DiningScrapeSourceSummary;
   counts: DiningScrapeRunCounts;
   fetch: DiningScrapeRunFetch;
   durationMs: number;
@@ -183,6 +197,28 @@ function fetchMetadata(response: ScrapeDoResponse): DiningScrapeRunFetch {
     remainingCredits: response.remainingCredits,
     attempts: response.attempts,
     durationMs: response.durationMs,
+  });
+}
+
+function summarizeSource(
+  menu: DiningMappedMenu,
+  locale: DiningLocale,
+  alternates: Partial<Record<DiningLocale, string>>,
+  belongsToPlatform: (url: string) => boolean
+): DiningScrapeSourceSummary {
+  const r = menu.restaurant;
+  const alternateUrls: Partial<Record<DiningLocale, string>> = {};
+  for (const l of DINING_LOCALES) {
+    const url = alternates[l];
+    if (url && belongsToPlatform(url)) alternateUrls[l] = url;
+  }
+  return stripUndefined({
+    platformRestaurantId: r.platformRestaurantId,
+    name: r.name[locale] ?? r.name.en ?? r.name.ar,
+    location: r.location,
+    alternateUrls,
+    categories: menu.categories.length,
+    distinctItems: new Set(menu.items.map(i => i.sourceKey)).size,
   });
 }
 
@@ -358,6 +394,7 @@ export async function runDiningScrape(input: unknown, context: DiningScrapeConte
       status,
       dryRun: request.dryRun,
       restaurantId: request.dryRun && counts.restaurantsCreated === 1 ? undefined : persisted.restaurantId,
+      source: summarizeSource(menu, request.locale, adapter.getAlternateUrls?.(parsed) ?? {}, url => adapter.matchesUrl(url)),
       counts,
       fetch,
       durationMs: finished?.durationMs ?? Math.max(0, now().getTime() - startedAt.getTime()),

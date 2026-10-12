@@ -111,6 +111,15 @@ describe('runDiningScrape against a local MongoDB (fake Scrape.do)', { skip: LOC
     assert.equal(result.counts.itemsCreated, 332);
     assert.deepEqual(result.fetch, { statusCode: 200, initialStatusCode: 200, requestCost: 5, remainingCredits: 990, attempts: 1, durationMs: 1200 });
     assert.ok(result.restaurantId);
+    const { name, ...source } = result.source;
+    assert.match(name!, /Kamat/);
+    assert.deepEqual(source, {
+      platformRestaurantId: '76728',
+      location: { city: 'dubai', area: 'Dubai Business Bay', address: 'Ground Level, Bay Avenue, Executive Tower G, Dubai', lat: 25.189217736842103, lng: 55.26528257142861 },
+      alternateUrls: FIXTURE_URL,
+      categories: 28,
+      distinctItems: 332,
+    });
 
     const run = (await t.collections.scrapeRuns.findOne({ runId: result.runId }))!;
     assert.equal(run.status, 'succeeded');
@@ -137,6 +146,14 @@ describe('runDiningScrape against a local MongoDB (fake Scrape.do)', { skip: LOC
     const run = (await t.collections.scrapeRuns.findOne({ runId: result.runId }))!;
     assert.equal(run.dryRun, true);
     assert.equal(run.status, 'succeeded');
+    assert.equal(result.source.platformRestaurantId, '76728');
+    assert.equal(result.source.location?.lat, 25.189217736842103);
+  });
+
+  test('dry-run source summary keeps only alternate URLs that belong to the platform', async () => {
+    const foreign = (url: string) => pageByLocale(url).replace('hreflang="ar-AE" href="https://deliveroo.ae/', 'hreflang="ar-AE" href="https://evil.example/');
+    const result = await runDiningScrape(body({ dryRun: true }), context(fakeScrapeDo(foreign).client));
+    assert.deepEqual(result.source.alternateUrls, { en: FIXTURE_URL.en });
   });
 
   test('13+14. EN then AR merge into the same documents; repeats create nothing', async () => {

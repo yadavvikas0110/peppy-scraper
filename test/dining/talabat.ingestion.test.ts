@@ -202,6 +202,14 @@ describe('Talabat through runDiningScrape against a local MongoDB (fake Scrape.d
       assert.deepEqual(result.warnings.byCode, { MODIFIERS_NOT_EMBEDDED: 1 });
       assert.deepEqual(result.errors, []);
       assert.deepEqual(result.fetch, { statusCode: 200, initialStatusCode: 200, finalUrl: URLS[locale], requestCost: 1, remainingCredits: 888, attempts: 1, durationMs: 1200 });
+      assert.equal(result.source.platformRestaurantId, '773429');
+      assert.deepEqual(result.source.alternateUrls, URLS);
+      assert.deepEqual([result.source.categories, result.source.distinctItems], [28, 333]);
+      // Location is locale-neutral and only read from the reference (English) page.
+      assert.deepEqual(
+        result.source.location,
+        locale === 'en' ? { city: 'Dubai', area: 'The Palm Jumeirah', lat: 25.111222348578067, lng: 55.141854912966906 } : undefined
+      );
     }
     for (const c of [t.collections.restaurants, t.collections.menuCategories, t.collections.menuItems]) {
       assert.equal(await c.countDocuments(), 0);

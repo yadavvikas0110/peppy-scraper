@@ -6,7 +6,7 @@ import { join } from 'path';
 import { ObjectId } from 'mongodb';
 import { parseSourceKey } from '../../src/dining/dining.source-key';
 import type { DiningLocale, DiningRestaurant, LocalizedText } from '../../src/dining/dining.types';
-import { evaluateCandidate } from '../../src/dining/identity/identity.matcher';
+import { compareBranchLocation, evaluateCandidate } from '../../src/dining/identity/identity.matcher';
 import { extractSourceSignals, toGroupSignals } from '../../src/dining/identity/identity.signals';
 import { DiningMappedMenu, DiningMappingError, DiningRestaurantDto } from '../../src/dining/platforms/platform.mapper';
 import { mapTalabatMenu, talabatMapper } from '../../src/dining/platforms/talabat/talabat.mapper';
@@ -243,5 +243,20 @@ describe('Talabat mapper — restaurant identity boundary', () => {
     assert.equal(verdict.verdict, 'none');
     assert.ok(verdict.evidence.signals.includes('BRAND_EXACT'));
     assert.ok(verdict.evidence.conflicts.includes('AREA_MISMATCH'));
+  });
+
+  test('a delivery area that differs from the branch area does not create a branch conflict', () => {
+    // Talabat Mercato Mall opened with aid=4577 (Dubai Design District) vs the Deliveroo Mercato Mall listing.
+    const talabat = mapped('en', withMenuState(HTML.en, s => {
+      s.restaurant.areaName = 'Jumeirah 1';
+      s.area.name = 'Dubai Design District';
+      s.restaurant.latitude = '25.2162736807142';
+      s.restaurant.longitude = '55.25256956864778';
+    })).restaurant;
+    const deliveroo = { ...deliverooBusinessBay, location: { city: 'dubai', area: 'Jumeirah 1', lat: 25.21607497145812, lng: 55.25297999382019 } };
+    const branch = compareBranchLocation(toGroupSignals(extractSourceSignals(asRestaurant(talabat))), toGroupSignals(extractSourceSignals(asRestaurant(deliveroo))));
+    assert.deepEqual(branch.conflicts, []);
+    assert.ok(branch.signals.includes('AREA_COMPATIBLE'));
+    assert.ok(branch.signals.includes('LOCATION_NEAR'));
   });
 });

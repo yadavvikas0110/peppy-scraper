@@ -10,9 +10,13 @@ import type { PlatformParseWarning } from '../platform.types';
 export type TalabatDataSource = 'next-data' | 'none';
 
 export interface TalabatRawLocation {
-  // initialMenuState.area — the delivery area in the URL (`aid`), localized.
+  // restaurant.areaName — the branch's own area (not localized). Branch identity evidence.
   area?: string;
+  // initialMenuState.area — the customer delivery area chosen by the URL (`aid`), localized.
+  // It describes where the page delivers to, never where the branch is.
+  deliveryArea?: string;
   city?: string;
+  // ID of the delivery area (`aid`).
   platformAreaId?: number;
   platformCityId?: number;
   // Branch coordinates (restaurant.latitude/longitude; the AR page formats them with Arabic decimals).

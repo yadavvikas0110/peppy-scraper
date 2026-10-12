@@ -64,13 +64,32 @@ export function hasBranchLocator(signals: RestaurantMatchSignals): boolean {
   return !!signals.address || !!signals.area || (signals.lat !== undefined && signals.lng !== undefined);
 }
 
+// Explicit, verified naming differences between platforms (normalized text). Keep this list short:
+// every entry must name one real place, never two neighbouring ones.
+// Platform spellings of the same place: Talabat writes "Ibn Batutta", Deliveroo "Ibn Battuta".
+export const AREA_SPELLINGS: Readonly<Record<string, string>> = { 'ibn batutta': 'ibn battuta' };
+// [development, district]: the development lies inside the district (Deliveroo lists McDonald's
+// City Walk under "City Walk", Talabat under its district "Al Wasl").
+export const AREA_WITHIN: ReadonlyArray<readonly [string, string]> = [['city walk', 'al wasl']];
+
+const containsWords = (text: string, words: string) => ` ${text} `.includes(` ${words} `);
+
+function canonicalAreaSpelling(area: string): string {
+  let out = ` ${area} `;
+  for (const [variant, canonical] of Object.entries(AREA_SPELLINGS)) out = out.split(` ${variant} `).join(` ${canonical} `);
+  return out.trim();
+}
+
 // Areas are compatible when equal or one contains the other as whole words
-// ("dubai business bay" ⊇ "business bay").
+// ("dubai business bay" ⊇ "business bay"), after the explicit spellings and containments above.
 export function areasCompatible(a: string, b: string): boolean {
   if (a === b) return true;
-  const pa = ` ${a} `;
-  const pb = ` ${b} `;
-  return pa.includes(pb) || pb.includes(pa);
+  const ca = canonicalAreaSpelling(a);
+  const cb = canonicalAreaSpelling(b);
+  if (containsWords(ca, cb) || containsWords(cb, ca)) return true;
+  return AREA_WITHIN.some(
+    ([inner, outer]) => (containsWords(ca, inner) && containsWords(cb, outer)) || (containsWords(cb, inner) && containsWords(ca, outer))
+  );
 }
 
 export function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
