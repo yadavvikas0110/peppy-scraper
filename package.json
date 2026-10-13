@@ -18,7 +18,8 @@
     "dining:item-mappings-import": "node dist/src/dining/item-mappings/item-mapping.import.cli.js",
     "dining:item-mappings-match": "node dist/src/dining/item-mappings/item-mapping.match.cli.js",
     "dining:item-mappings-approve": "node dist/src/dining/item-mappings/item-mapping.approve.cli.js",
-    "dining:item-mappings-decide": "node dist/src/dining/item-mappings/item-mapping.decisions.cli.js"
+    "dining:item-mappings-decide": "node dist/src/dining/item-mappings/item-mapping.decisions.cli.js",
+    "dining:cron": "node dist/src/dining/cron/dining-cron.cli.js"
   },
   "keywords": [],
   "author": "",

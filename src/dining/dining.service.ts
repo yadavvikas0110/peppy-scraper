@@ -151,6 +151,20 @@ export interface DiningScrapeContext {
   logger?: Pick<Console, 'log' | 'warn' | 'error'>;
   // false → never mark unseen items inactive for this call.
   allowDeactivation?: boolean;
+  // Refresh of a stored restaurant: the fetched page must identify as this restaurant, otherwise
+  // nothing is written (a redirect to another branch must never create or update a different one).
+  expectedRestaurant?: { platformRestaurantId?: string; sourceKey: string };
+}
+
+export function matchesExpectedRestaurant(
+  menu: Pick<DiningMappedMenu, 'restaurant'>,
+  expected: NonNullable<DiningScrapeContext['expectedRestaurant']>
+): boolean {
+  const actual = menu.restaurant;
+  if (expected.platformRestaurantId && actual.platformRestaurantId) {
+    return expected.platformRestaurantId === actual.platformRestaurantId;
+  }
+  return expected.sourceKey === actual.sourceKey;
 }
 
 // What the fetched page identifies itself as, so a dry run can verify the branch before an import.
@@ -340,6 +354,12 @@ export async function runDiningScrape(input: unknown, context: DiningScrapeConte
     } catch (err) {
       if (err instanceof DiningMappingError) throw await fail('map', err.code, 422, err.message);
       throw await fail('map', 'MAPPING_FAILED', 500, `Mapping failed: ${(err as Error)?.message ?? 'unknown error'}`);
+    }
+    if (context.expectedRestaurant && !matchesExpectedRestaurant(menu, context.expectedRestaurant)) {
+      throw await fail(
+        'validate', 'RESTAURANT_IDENTITY_MISMATCH', 409,
+        `The page belongs to a different restaurant (platform ID ${menu.restaurant.platformRestaurantId ?? 'n/a'}) than the one being refreshed`
+      );
     }
     if (menu.items.length === 0) {
       throw await fail('parse', 'NO_MENU_ITEMS', 422, 'No menu items could be extracted from the page', { warnings: countByCode(menu) });
