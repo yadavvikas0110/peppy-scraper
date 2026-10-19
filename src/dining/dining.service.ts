@@ -154,6 +154,8 @@ export interface DiningScrapeContext {
   // Refresh of a stored restaurant: the fetched page must identify as this restaurant, otherwise
   // nothing is written (a redirect to another branch must never create or update a different one).
   expectedRestaurant?: { platformRestaurantId?: string; sourceKey: string };
+  // Runs after a successful, non-dry scrape (e.g. cross-platform linking). Never fails the scrape.
+  afterScrape?: (info: { restaurantId: string; platform: DiningPlatform; locale: DiningLocale }) => Promise<void>;
 }
 
 export function matchesExpectedRestaurant(
@@ -405,7 +407,14 @@ export async function runDiningScrape(input: unknown, context: DiningScrapeConte
       `updated=${counts.itemsUpdated} unchanged=${counts.itemsUnchanged} rejected=${counts.itemsRejected} inactive=${counts.itemsMarkedInactive}`
     );
 
-    // 11. Result
+    // 11. Post-scrape hook (best effort: the scrape itself already succeeded)
+    if (context.afterScrape && !request.dryRun && persisted.restaurantId) {
+      await context.afterScrape({ restaurantId: persisted.restaurantId, platform: request.platform, locale: request.locale }).catch(err =>
+        logger.warn(`[dining] Post-scrape step failed for run ${runId}: ${sanitizeRunMessage((err as Error)?.message)}`)
+      );
+    }
+
+    // 12. Result
     return {
       runId,
       platform: request.platform,

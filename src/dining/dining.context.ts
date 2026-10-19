@@ -1,8 +1,10 @@
 import { getMongoDb } from '../shared/db/mongo';
 import { createScrapeDoClient } from '../shared/scrapedo/scrapedo.client';
+import { ObjectId } from 'mongodb';
 import { ensureDiningIndexes, getDiningCollections } from './db/dining.collections';
 import { createDiningRepositories, DiningRepositories } from './dining.persistence';
 import type { DiningScrapeContext } from './dining.service';
+import { autoLinkRestaurant, isAutoLinkEnabled, isAutoVerifyEnabled } from './linking/dining-auto-link';
 
 // Production wiring: env-configured Scrape.do client and MongoDB. Nothing connects at import time;
 // the first scrape connects and makes sure the dining_* indexes (unique identities, run lock) exist.
@@ -28,5 +30,11 @@ export function createDefaultDiningScrapeContext(): DiningScrapeContext {
     scrapeDo: createScrapeDoClient(),
     repositories: getDefaultRepositories,
     trigger: 'manual',
+    // Links the restaurant across platforms once it has been scraped (DINING_AUTO_LINK=false disables).
+    afterScrape: isAutoLinkEnabled()
+      ? async ({ restaurantId }) => {
+          await autoLinkRestaurant(await getMongoDb(), new ObjectId(restaurantId), { autoVerify: isAutoVerifyEnabled() });
+        }
+      : undefined,
   };
 }

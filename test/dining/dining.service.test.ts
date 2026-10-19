@@ -135,6 +135,18 @@ describe('runDiningScrape against a local MongoDB (fake Scrape.do)', { skip: LOC
     assert.equal(await t.collections.menuItems.countDocuments(), 332);
   });
 
+  test('post-scrape hook runs once for a real scrape, never for a dry run, and cannot fail the scrape', async () => {
+    const seen: Array<{ restaurantId: string; platform: string; locale: string }> = [];
+    const result = await runDiningScrape(body(), context(undefined, { afterScrape: async info => { seen.push(info); } }));
+    assert.deepEqual(seen, [{ restaurantId: result.restaurantId!, platform: 'deliveroo', locale: 'en' }]);
+
+    await runDiningScrape(body({ dryRun: true }), context(undefined, { afterScrape: async info => { seen.push(info); } }));
+    assert.equal(seen.length, 1);
+
+    const failing = await runDiningScrape(body(), context(undefined, { afterScrape: async () => { throw new Error('link failed'); } }));
+    assert.equal(failing.status, 'succeeded');
+  });
+
   test('6. dry run: fetch, parse, map, validate and count, but no menu writes', async () => {
     const result = await runDiningScrape(body({ dryRun: true }), context());
     assert.equal(result.dryRun, true);
