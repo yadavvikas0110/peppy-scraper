@@ -28,8 +28,7 @@ import {
   pageByLocale,
   TestDb,
   THALI,
-  withMenuRoot,
-} from './helpers';
+  withMenuRoot, fakeUpload } from './helpers';
 
 const silent = { log: () => {}, warn: () => {}, error: () => {} };
 const localeOf = (url: string): DiningLocale => (url.includes('/ar/') ? 'ar' : 'en');
@@ -199,7 +198,7 @@ describe('dining cron jobs (local MongoDB, fake Scrape.do)', { skip: LOCAL_DB_SK
 
   // The restaurant as it exists today: scraped once in English and once in Arabic.
   async function seed() {
-    const context = { scrapeDo: fakeScrapeDo(pageByLocale).client, repositories: t.repos, logger: silent };
+    const context = { scrapeDo: fakeScrapeDo(pageByLocale).client, repositories: t.repos, logger: silent, uploadImage: fakeUpload };
     for (const locale of ['en', 'ar'] as const) {
       await runDiningScrape({ platform: 'deliveroo', locale, targetUrl: FIXTURE_URL[locale], dryRun: false }, context);
     }
@@ -208,7 +207,7 @@ describe('dining cron jobs (local MongoDB, fake Scrape.do)', { skip: LOCAL_DB_SK
 
   const deps = (scrapeDo: Pick<ScrapeDoClient, 'fetchHtml'>, extra: Partial<DiningRunnerExtras> = {}): DiningCronRunnerDeps => ({
     collections: cron,
-    scrapeContext: { scrapeDo, repositories: t.repos, logger: silent },
+    scrapeContext: { scrapeDo, repositories: t.repos, logger: silent, uploadImage: fakeUpload },
     logger: silent,
     sleep: async () => {},
     owner: { host: 'test', pid: 1 },
@@ -470,7 +469,7 @@ describe('dining cron jobs (local MongoDB, fake Scrape.do)', { skip: LOCAL_DB_SK
       ar: 'https://www.talabat.com/ar/uae/restaurant/773429/kamat-vegetarian-the-palm-jumeirah?aid=1333',
     };
     const talabatPage = (url: string) => html[url.includes('/ar/') ? 'ar' : 'en'];
-    const context = { scrapeDo: fakeScrapeDo(talabatPage).client, repositories: t.repos, logger: silent };
+    const context = { scrapeDo: fakeScrapeDo(talabatPage).client, repositories: t.repos, logger: silent, uploadImage: fakeUpload };
     for (const locale of ['en', 'ar'] as const) {
       await runDiningScrape({ platform: 'talabat', locale, targetUrl: urls[locale], dryRun: false }, context);
     }

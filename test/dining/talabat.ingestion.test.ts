@@ -15,7 +15,7 @@ import { buildCategoryUpdate } from '../../src/dining/repositories/menu-category
 import { buildItemUpdate } from '../../src/dining/repositories/menu-item.repository';
 import type { DiningWriteContext, RestaurantRef } from '../../src/dining/repositories/repository.types';
 import { buildRestaurantUpdate } from '../../src/dining/repositories/restaurant.repository';
-import { closeTestClient, fakeScrapeDo, LOCAL_DB_SKIP, openTestDb, TestDb } from './helpers';
+import { closeTestClient, fakeScrapeDo, LOCAL_DB_SKIP, openTestDb, TestDb, fakeUpload } from './helpers';
 
 // Talabat through the shared ingestion contract. No network; the DB section needs a local MongoDB.
 
@@ -185,6 +185,7 @@ describe('Talabat through runDiningScrape against a local MongoDB (fake Scrape.d
     scrapeDo: fakeScrapeDo(page, { requestCost: 1, remainingCredits: 888 }).client,
     repositories: t.repos,
     logger: silent,
+    uploadImage: fakeUpload,
     now: () => NOW,
   });
 

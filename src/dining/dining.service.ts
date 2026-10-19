@@ -3,6 +3,8 @@ import { isScrapeDoError } from '../shared/scrapedo/scrapedo.errors';
 import type { ScrapeDoResponse } from '../shared/scrapedo/scrapedo.types';
 import { redactMongoUri } from '../shared/db/mongo';
 import { stripUndefined } from './dining.object';
+import { isS3Configured, uploadImageFromUrl } from '../utils/s3.util';
+import { uploadMenuImages } from './dining.images';
 import { DiningRepositories, InactiveDecision, persistMappedMenu } from './dining.persistence';
 import {
   DINING_LOCALES,
@@ -155,6 +157,8 @@ export interface DiningScrapeContext {
   // nothing is written (a redirect to another branch must never create or update a different one).
   expectedRestaurant?: { platformRestaurantId?: string; sourceKey: string };
   // Runs after a successful, non-dry scrape (e.g. cross-platform linking). Never fails the scrape.
+  // Uploads a source image to our S3 and returns the CDN URL (defaults to S3 via s3.util). Injectable for tests.
+  uploadImage?: (sourceUrl: string, folder: string) => Promise<string>;
   afterScrape?: (info: { restaurantId: string; platform: DiningPlatform; locale: DiningLocale }) => Promise<void>;
 }
 
@@ -320,6 +324,12 @@ export async function runDiningScrape(input: unknown, context: DiningScrapeConte
       return error;
     };
 
+    // Images are stored on our S3 only (never the platform's URL), so refuse to scrape without it.
+    const uploadImage = context.uploadImage ?? ((url: string, folder: string) => uploadImageFromUrl(url, { folder }));
+    if (!request.dryRun && !context.uploadImage && !isS3Configured()) {
+      throw await fail('setup', 'S3_NOT_CONFIGURED', 503, 'S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY and S3_BUCKET must be set to store menu images');
+    }
+
     // 4–5. Platform fetch options → generic Scrape.do client
     let response: ScrapeDoResponse;
     try {
@@ -370,6 +380,13 @@ export async function runDiningScrape(input: unknown, context: DiningScrapeConte
     // 8. Validate canonical restaurant
     const restaurantProblem = validateCanonicalRestaurant(menu, request.locale, runId, now());
     if (restaurantProblem) throw await fail('validate', 'INVALID_RESTAURANT', 422, `Restaurant failed validation: ${restaurantProblem}`);
+
+    // 8b. Images → our S3. imageUrl is replaced with the CDN URL; on failure it is dropped so the
+    // platform URL is never stored (an already-stored CDN URL is kept, scrape retries it next time).
+    if (!request.dryRun) {
+      const imageStats = await uploadMenuImages(menu, uploadImage, logger);
+      logger.log(`[dining] ${request.platform} ${request.locale} run ${runId}: images uploaded=${imageStats.uploaded} failed=${imageStats.failed}`);
+    }
 
     // 9. Persist (restaurant → categories → items → guarded inactive marking)
     let persisted;

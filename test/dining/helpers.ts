@@ -138,3 +138,7 @@ export async function closeTestClient(): Promise<void> {
   await client?.close();
   client = null;
 }
+
+// Stands in for the S3 upload in scrape tests: no network, deterministic CDN-style URL.
+export const fakeUpload = async (url: string, folder: string): Promise<string> =>
+  `https://cdn.test/${folder}/${Buffer.from(url).toString('hex').slice(0, 24)}.jpg`;

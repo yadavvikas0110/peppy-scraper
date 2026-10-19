@@ -7,7 +7,7 @@ import { createDiningApp } from '../../src/dining/dining.app';
 import type { DiningControllerDeps } from '../../src/dining/dining.controller';
 import { DiningScrapeError, DiningScrapeRequest, DiningScrapeResult, runDiningScrape } from '../../src/dining/dining.service';
 import { emptyScrapeRunCounts } from '../../src/dining/dining.types';
-import { closeTestClient, fakeScrapeDo, FIXTURE_URL, LOCAL_DB_SKIP, openTestDb, pageByLocale, TestDb, THALI } from './helpers';
+import { closeTestClient, fakeScrapeDo, FIXTURE_URL, LOCAL_DB_SKIP, openTestDb, pageByLocale, TestDb, THALI, fakeUpload } from './helpers';
 
 const API_KEY = 'test-dining-key-0123456789';
 
@@ -166,7 +166,7 @@ describe('POST /api/dining/scrape end-to-end (local MongoDB, fake Scrape.do)', {
     t = await openTestDb('api');
     const fake = fakeScrapeDo(pageByLocale);
     const silent = { log: () => {}, warn: () => {}, error: () => {} };
-    server = await startServer({ runScrape: r => runDiningScrape(r, { scrapeDo: fake.client, repositories: t.repos, logger: silent }) });
+    server = await startServer({ runScrape: r => runDiningScrape(r, { scrapeDo: fake.client, repositories: t.repos, logger: silent, uploadImage: fakeUpload }) });
   });
   after(async () => {
     await server?.close();

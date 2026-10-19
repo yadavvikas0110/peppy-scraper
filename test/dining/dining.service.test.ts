@@ -20,8 +20,7 @@ import {
   pageByLocale,
   TestDb,
   THALI,
-  withMenuRoot,
-} from './helpers';
+  withMenuRoot, fakeUpload } from './helpers';
 
 const silent = { log: () => {}, warn: () => {}, error: () => {} };
 const body = (overrides: Record<string, unknown> = {}) => ({ platform: 'deliveroo', locale: 'en', targetUrl: FIXTURE_URL.en, dryRun: false, ...overrides });
@@ -79,6 +78,7 @@ describe('scrape request validation', () => {
       scrapeDo: { fetchHtml: async () => { touched = true; throw new Error('no'); } },
       repositories: async () => { touched = true; throw new Error('no'); },
       logger: silent,
+      uploadImage: fakeUpload,
     };
     await expectScrapeError(runDiningScrape(body({ locale: 'de' }), ctx), { stage: 'validation', code: 'UNSUPPORTED_LOCALE', httpStatus: 400 });
     assert.equal(touched, false);
@@ -92,7 +92,7 @@ describe('runDiningScrape against a local MongoDB (fake Scrape.do)', { skip: LOC
   after(async () => { await t?.close(); await closeTestClient(); });
 
   const context = (scrapeDo = fakeScrapeDo(pageByLocale).client, extra: Partial<DiningScrapeContext> = {}): DiningScrapeContext =>
-    ({ scrapeDo, repositories: t.repos, logger: silent, ...extra });
+    ({ scrapeDo, repositories: t.repos, logger: silent, uploadImage: fakeUpload, ...extra });
 
   test('7+12. real scrape: full pipeline, persisted data and a complete run record', async () => {
     const fake = fakeScrapeDo(pageByLocale, { finalUrl: `https://api.scrape.do/?token=${FAKE_SCRAPE_DO_TOKEN}` });
