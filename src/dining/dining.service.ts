@@ -17,6 +17,7 @@ import {
   DiningScrapeRunTrigger,
 } from './dining.types';
 import { DiningValidationError, validateRestaurant } from './dining.validator';
+import type { PlatformOffers } from './offers/offer.types';
 import { DiningMappedMenu, DiningMappingError, DiningMenuCompleteness } from './platforms/platform.mapper';
 import { DiningPlatformRegistry, getDiningPlatformModule, getSupportedDiningPlatforms } from './platforms/platform.registry';
 import { PLATFORM_REJECTION_CODES } from './platforms/platform.types';
@@ -160,6 +161,8 @@ export interface DiningScrapeContext {
   // Uploads a source image to our S3 and returns the CDN URL (defaults to S3 via s3.util). Injectable for tests.
   uploadImage?: (sourceUrl: string, folder: string) => Promise<string>;
   afterScrape?: (info: { restaurantId: string; platform: DiningPlatform; locale: DiningLocale }) => Promise<void>;
+  // Stores the restaurant-level offers found on the page. Best effort: a failure never fails the scrape.
+  offerSink?: (info: { platform: DiningPlatform; locale: DiningLocale; restaurantId: string; runId: string; offers: PlatformOffers }) => Promise<void>;
 }
 
 export function matchesExpectedRestaurant(
@@ -423,6 +426,19 @@ export async function runDiningScrape(input: unknown, context: DiningScrapeConte
       `[dining] Run ${runId} ${status}${request.dryRun ? ' (dry run)' : ''}: items created=${counts.itemsCreated} ` +
       `updated=${counts.itemsUpdated} unchanged=${counts.itemsUnchanged} rejected=${counts.itemsRejected} inactive=${counts.itemsMarkedInactive}`
     );
+
+    // 10b. Offers on the page (best effort: the scrape itself already succeeded)
+    if (context.offerSink && adapter.extractOffers && !request.dryRun && persisted.restaurantId) {
+      try {
+        const offers = adapter.extractOffers(response.html, { locale: request.locale, sourceUrl: request.targetUrl });
+        if (offers) {
+          await context.offerSink({ platform: request.platform, locale: request.locale, restaurantId: persisted.restaurantId, runId, offers });
+          logger.log(`[dining] Run ${runId} offers: ${offers.offers.length} running (${offers.offers.map(o => o.type).join(', ') || 'none'})`);
+        }
+      } catch (err) {
+        logger.warn(`[dining] Offers could not be stored for run ${runId}: ${sanitizeRunMessage((err as Error)?.message)}`);
+      }
+    }
 
     // 11. Post-scrape hook (best effort: the scrape itself already succeeded)
     if (context.afterScrape && !request.dryRun && persisted.restaurantId) {

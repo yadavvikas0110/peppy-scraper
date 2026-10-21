@@ -1,6 +1,7 @@
 import type { ScrapeDoRequestOptions } from '../../shared/scrapedo/scrapedo.types';
 import type { SourceIdentity, StableSourceIdentity } from '../dining.source-key';
 import type { DiningLocale, DiningPlatform } from '../dining.types';
+import type { PlatformOffers } from '../offers/offer.types';
 
 // Platform-agnostic contract every dining platform (Deliveroo, Talabat, Careem, …) implements.
 // The generic Scrape.do client and the Dining domain never import platform code.
@@ -48,4 +49,6 @@ export interface DiningPlatformAdapter<TParseResult> {
   getIdentityInputs(result: TParseResult): PlatformIdentityInputs;
   // The page's own hreflang alternates (e.g. the verified Arabic URL of an English page).
   getAlternateUrls?(result: TParseResult): Partial<Record<DiningLocale, string>>;
+  // Restaurant-level offers shown on the fetched page; null when the page carries no offer data at all.
+  extractOffers?(html: string, context: PlatformParseContext): PlatformOffers | null;
 }

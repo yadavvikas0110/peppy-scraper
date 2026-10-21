@@ -10,6 +10,7 @@ import {
   waitForSelectorAction,
 } from '../browser-actions';
 import type { DiningPlatformAdapter, PlatformIdentityInputs, PlatformParseContext } from '../platform.types';
+import { extractDeliverooMenuOffers } from './deliveroo.offers';
 import { parseDeliverooMenu } from './deliveroo.parser';
 import { DELIVEROO_SELECTORS } from './deliveroo.selectors';
 import type { DeliverooItemDetail, DeliverooParseResult } from './deliveroo.types';
@@ -116,6 +117,7 @@ export const deliverooAdapter: DiningPlatformAdapter<DeliverooParseResult> = {
   parse: (html: string, context: PlatformParseContext) => parseDeliverooMenu(html, context),
   getIdentityInputs: getDeliverooIdentityInputs,
   getAlternateUrls: result => result.restaurant?.alternateUrls ?? {},
+  extractOffers: html => extractDeliverooMenuOffers(html),
 };
 
 // ─── Fetch (one Scrape.do request per call) ──────────────────────────────────
