@@ -37,15 +37,31 @@ function validCoordinates(lat: unknown, lng: unknown): { lat: number; lng: numbe
   return { lat, lng };
 }
 
+// Deliveroo names a branch "Brand - Place" ("Chipotle - City Walk") and gives no separate brand, so the brand is the part
+// before the separator. Without it a Deliveroo listing could never be nominated against a Talabat "Chipotle, City Walk, Al Wasl":
+// the names differ and there is no brand to compare. Only used when the platform gave no brand of its own, and only to
+// nominate a candidate: a candidate still needs branch evidence (same city, no far-apart pins, ...) to be matched.
+export function brandKeysFromName(name: LocalizedText | undefined): string[] {
+  const keys = [name?.en, name?.ar].flatMap(text => {
+    if (typeof text !== 'string') return [];
+    const parts = text.split(/\s[-–—]\s/);
+    if (parts.length < 2) return [];
+    const key = normalizeIdentityText(parts[0]);
+    return key && key.length >= 3 ? [key] : [];
+  });
+  return [...new Set(keys)];
+}
+
 export function extractSourceSignals(restaurant: DiningRestaurant): SourceRestaurantSignals {
   const location = restaurant.location ?? {};
   const coords = validCoordinates(location.lat, location.lng);
+  const ownBrands = localizedKeys(restaurant.brandName);
   return {
     platform: restaurant.platform,
     platformRestaurantId: restaurant.platformRestaurantId,
     slug: restaurant.slug,
     names: localizedKeys(restaurant.name),
-    brands: localizedKeys(restaurant.brandName),
+    brands: ownBrands.length ? ownBrands : brandKeysFromName(restaurant.name),
     city: normalizeIdentityText(location.city),
     area: normalizeIdentityText(location.area),
     address: normalizeIdentityText(location.address),
@@ -74,8 +90,13 @@ export const AREA_WITHIN: ReadonlyArray<readonly [string, string]> = [['city wal
 
 const containsWords = (text: string, words: string) => ` ${text} `.includes(` ${words} `);
 
+// "D.I.F.C." normalizes to "d i f c": a run of single letters is one abbreviation, "difc".
+function joinInitials(area: string): string {
+  return area.replace(/(^| )((?:\p{L} )+\p{L})(?= |$)/gu, (_m, before: string, run: string) => before + run.replace(/ /g, ''));
+}
+
 function canonicalAreaSpelling(area: string): string {
-  let out = ` ${area} `;
+  let out = ` ${joinInitials(area)} `;
   for (const [variant, canonical] of Object.entries(AREA_SPELLINGS)) out = out.split(` ${variant} `).join(` ${canonical} `);
   return out.trim();
 }

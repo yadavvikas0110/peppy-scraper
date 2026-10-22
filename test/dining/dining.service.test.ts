@@ -147,6 +147,54 @@ describe('runDiningScrape against a local MongoDB (fake Scrape.do)', { skip: LOC
     assert.equal(failing.status, 'succeeded');
   });
 
+  test('Deliveroo is fetched plain first; one rendered fallback only when the page has no menu data or the request fails', async () => {
+    // normal: one plain request
+    const ok = fakeScrapeDo(pageByLocale);
+    await runDiningScrape(body(), context(ok.client));
+    assert.equal(ok.calls.length, 1);
+    assert.equal(ok.calls[0].options?.render, false);
+
+    // a page without menu data (bot check): the plain request, then the rendered fallback, whose page is used
+    await t.reset();
+    const blocked = fakeScrapeDo(url => (blocked.calls.length === 1 ? '<html><body>Just a moment...</body></html>' : pageByLocale(url)), { requestCost: 5 });
+    const result = await runDiningScrape(body(), context(blocked.client));
+    assert.equal(result.status, 'succeeded');
+    assert.deepEqual(blocked.calls.map(c => c.options?.render), [false, true]);
+
+    // a blocked/timed-out plain request: the same single fallback
+    await t.reset();
+    const calls: Array<boolean | undefined> = [];
+    const flaky: DiningScrapeContext['scrapeDo'] = {
+      async fetchHtml(url, options) {
+        calls.push(options?.render);
+        if (calls.length === 1) throw new ScrapeDoError({ category: 'blocked', message: 'blocked' });
+        return fakeScrapeDo(pageByLocale).client.fetchHtml(url, options);
+      },
+    };
+    assert.equal((await runDiningScrape(body(), context(flaky))).status, 'succeeded');
+    assert.deepEqual(calls, [false, true]);
+  });
+
+  test('no fallback request for quota, auth or config failures (it would only burn more credits)', async () => {
+    for (const category of ['quota', 'auth', 'config'] as const) {
+      const calls: number[] = [];
+      const denied: DiningScrapeContext['scrapeDo'] = {
+        async fetchHtml() {
+          calls.push(1);
+          throw new ScrapeDoError({ category, message: category });
+        },
+      };
+      await expectScrapeError(runDiningScrape(body(), context(denied)), { stage: 'fetch' });
+      assert.equal(calls.length, 1, category);
+    }
+  });
+
+  test('a page that is still unusable after the fallback fails (blocked/empty page) after exactly two requests', async () => {
+    const dead = fakeScrapeDo(() => '<html><body>nothing here</body></html>');
+    await expectScrapeError(runDiningScrape(body(), context(dead.client)), { stage: 'map' });
+    assert.equal(dead.calls.length, 2);
+  });
+
   test('6. dry run: fetch, parse, map, validate and count, but no menu writes', async () => {
     const result = await runDiningScrape(body({ dryRun: true }), context());
     assert.equal(result.dryRun, true);

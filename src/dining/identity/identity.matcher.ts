@@ -53,23 +53,29 @@ export interface BranchComparison {
 // Branch (location) evidence only: city, area, address and coordinates. Names and brands are not compared.
 export function compareBranchLocation(source: RestaurantMatchSignals, target: RestaurantMatchSignals): BranchComparison {
   const out: BranchComparison = { signals: [], conflicts: [] };
+  const bothPinned = source.lat !== undefined && source.lng !== undefined && target.lat !== undefined && target.lng !== undefined;
+  const pinDistance = bothPinned
+    ? Math.round(distanceMeters({ lat: source.lat as number, lng: source.lng as number }, { lat: target.lat as number, lng: target.lng as number }))
+    : undefined;
+  const pinsAgree = pinDistance !== undefined && pinDistance <= LOCATION_MATCH_METERS;
   if (source.city && target.city) {
     if (source.city === target.city) out.signals.push('CITY_EQUAL');
     else out.conflicts.push('CITY_MISMATCH');
   }
   if (source.area && target.area) {
     if (areasCompatible(source.area, target.area)) out.signals.push('AREA_COMPATIBLE');
-    else out.conflicts.push('AREA_MISMATCH');
+    // Platforms label places differently ("City Walk" / "Al Bada'a" / "Al Wasl"): two pins within LOCATION_MATCH_METERS are
+    // the same spot whatever the area labels say. Without agreeing pins the labels remain a hard conflict.
+    else if (!pinsAgree) out.conflicts.push('AREA_MISMATCH');
   }
   if (source.address && target.address) {
     if (source.address === target.address) out.signals.push('ADDRESS_EXACT');
     else out.conflicts.push('ADDRESS_MISMATCH');
   }
-  if (source.lat !== undefined && source.lng !== undefined && target.lat !== undefined && target.lng !== undefined) {
-    const d = Math.round(distanceMeters({ lat: source.lat, lng: source.lng }, { lat: target.lat, lng: target.lng }));
-    out.distanceMeters = d;
-    if (d <= LOCATION_MATCH_METERS) out.signals.push('LOCATION_NEAR');
-    else if (d > LOCATION_CONFLICT_METERS) out.conflicts.push('LOCATION_FAR');
+  if (pinDistance !== undefined) {
+    out.distanceMeters = pinDistance;
+    if (pinsAgree) out.signals.push('LOCATION_NEAR');
+    else if (pinDistance > LOCATION_CONFLICT_METERS) out.conflicts.push('LOCATION_FAR');
   }
   return out;
 }

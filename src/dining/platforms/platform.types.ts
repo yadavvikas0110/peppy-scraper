@@ -45,6 +45,10 @@ export interface DiningPlatformAdapter<TParseResult> {
   detectLocale(url: string, fallback?: DiningLocale): DiningLocale;
   toLocaleUrl(url: string, locale: DiningLocale): string;
   getFetchOptions(url: string, locale: DiningLocale): ScrapeDoRequestOptions;
+  // A costlier request (e.g. a rendered browser) tried once when the normal one fails or returns an unusable page.
+  getFallbackFetchOptions?(url: string, locale: DiningLocale): ScrapeDoRequestOptions;
+  // Whether the fetched HTML carries the menu data at all; false triggers the fallback request.
+  isUsablePage?(html: string): boolean;
   parse(html: string, context: PlatformParseContext): TParseResult;
   getIdentityInputs(result: TParseResult): PlatformIdentityInputs;
   // The page's own hreflang alternates (e.g. the verified Arabic URL of an English page).

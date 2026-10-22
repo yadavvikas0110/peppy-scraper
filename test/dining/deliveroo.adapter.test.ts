@@ -7,6 +7,7 @@ import {
   buildDeliverooImageCaptureOptions,
   buildDeliverooItemDetailOptions,
   DELIVEROO_FETCH_DEFAULTS,
+  DELIVEROO_PLAIN_FETCH_OPTIONS,
   deliverooAdapter,
   fetchDeliverooMenu,
 } from '../../src/dining/platforms/deliveroo/deliveroo.adapter';
@@ -50,14 +51,31 @@ describe('Deliveroo adapter — URLs and locale', () => {
     assert.equal(deliverooAdapter.toLocaleUrl('https://deliveroo.ae/menu/a/b/c', 'en'), 'https://deliveroo.ae/en/menu/a/b/c/');
   });
 
-  test('fetch options: rendered, UAE geo, no super proxy, fresh copy each call', () => {
+  test('fetch options: a plain request (1 credit), UAE geo, no super proxy, fresh copy each call', () => {
     const options = deliverooAdapter.getFetchOptions(MENU_EN, 'en');
-    assert.equal(options.render, true);
+    assert.equal(options.render, false);
     assert.equal(options.geoCode, 'ae');
     assert.equal(options.super, undefined);
     assert.equal(options.returnJSON, undefined);
-    options.customWait = 1;
+    options.timeout = 1;
+    assert.equal(DELIVEROO_PLAIN_FETCH_OPTIONS.timeout, 60000);
+  });
+
+  test('the fallback is the rendered browser request, a fresh copy each call', () => {
+    const fallback = deliverooAdapter.getFallbackFetchOptions!(MENU_EN, 'en');
+    assert.equal(fallback.render, true);
+    assert.equal(fallback.geoCode, 'ae');
+    assert.equal(fallback.super, undefined);
+    fallback.customWait = 1;
     assert.equal(DELIVEROO_FETCH_DEFAULTS.customWait, 2000);
+  });
+
+  test('a usable page carries menu items in __NEXT_DATA__; bot-check and error pages do not', () => {
+    const page = readFileSync(join(__dirname, 'fixtures', 'deliveroo-en.html'), 'utf8');
+    assert.equal(deliverooAdapter.isUsablePage!(page), true);
+    assert.equal(deliverooAdapter.isUsablePage!('<html><body>Just a moment...</body></html>'), false);
+    assert.equal(deliverooAdapter.isUsablePage!('<script id="__NEXT_DATA__">{broken</script>'), false);
+    assert.equal(deliverooAdapter.isUsablePage!('<script id="__NEXT_DATA__">{"props":{"initialState":{"menuPage":{"menu":{"metas":{"root":{"items":[]}}}}}}}</script>'), false);
   });
 });
 
@@ -84,7 +102,7 @@ describe('Deliveroo adapter — fetch (fake client, no network)', () => {
 
     assert.equal(calls.length, 1);
     assert.match(calls[0].url, /^https:\/\/deliveroo\.ae\/ar\/menu\//);
-    assert.deepEqual(calls[0].options, DELIVEROO_FETCH_DEFAULTS);
+    assert.deepEqual(calls[0].options, DELIVEROO_PLAIN_FETCH_OPTIONS);
     assert.deepEqual(out.cost, { requestCost: 5, remainingCredits: 990, attempts: 1, durationMs: 1234 });
     assert.equal(out.result.locale, 'ar');
     assert.equal(out.result.items.length, 332);

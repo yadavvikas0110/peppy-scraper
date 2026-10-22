@@ -17,8 +17,8 @@ import type { DeliverooItemDetail, DeliverooParseResult } from './deliveroo.type
 
 export const DELIVEROO_HOSTS = ['deliveroo.ae'] as const;
 
-// Scrape.do options for a Deliveroo menu page. Datacenter proxy (no `super`) unless proven insufficient:
-// both fixture captures succeeded with these options at 5 credits each.
+// Scrape.do options for a Deliveroo menu page that needs the browser (the fallback, and the browser-action hooks
+// below). Datacenter proxy (no `super`); 5 credits per request.
 export const DELIVEROO_FETCH_DEFAULTS: ScrapeDoRequestOptions = {
   render: true,
   geoCode: 'ae',
@@ -26,6 +26,15 @@ export const DELIVEROO_FETCH_DEFAULTS: ScrapeDoRequestOptions = {
   customWait: 2000,
   blockResources: false,
   timeout: 90000,
+};
+
+// The normal request: a plain HTML fetch (1 credit, about 5 s). The menu is server-rendered into script#__NEXT_DATA__,
+// and a plain and a rendered fetch of the same page were compared dish by dish (212 of 212 dishes, no difference in
+// price, image, description, item options or offers, English and Arabic), at a fifth of the credits.
+export const DELIVEROO_PLAIN_FETCH_OPTIONS: ScrapeDoRequestOptions = {
+  render: false,
+  geoCode: 'ae',
+  timeout: 60000,
 };
 
 function parseUrl(url: string): URL | null {
@@ -67,7 +76,25 @@ export function toDeliverooLocaleUrl(url: string, locale: DiningLocale): string 
 }
 
 export function getDeliverooFetchOptions(_url: string, _locale: DiningLocale): ScrapeDoRequestOptions {
+  return { ...DELIVEROO_PLAIN_FETCH_OPTIONS };
+}
+
+// Tried once (5 credits) when the plain request fails or returns a page without menu data.
+export function getDeliverooFallbackFetchOptions(_url: string, _locale: DiningLocale): ScrapeDoRequestOptions {
   return { ...DELIVEROO_FETCH_DEFAULTS };
+}
+
+// The page carries the menu: __NEXT_DATA__ with menu items. A bot-check or error page does not.
+export function hasDeliverooMenuData(html: string): boolean {
+  const match = /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/.exec(html);
+  if (!match) return false;
+  try {
+    const data = JSON.parse(match[1]) as { props?: { initialState?: { menuPage?: { menu?: { metas?: { root?: { items?: unknown } } } } } } };
+    const items = data.props?.initialState?.menuPage?.menu?.metas?.root?.items;
+    return Array.isArray(items) && items.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 // ─── Identity ────────────────────────────────────────────────────────────────
@@ -114,6 +141,8 @@ export const deliverooAdapter: DiningPlatformAdapter<DeliverooParseResult> = {
   detectLocale: detectDeliverooLocale,
   toLocaleUrl: toDeliverooLocaleUrl,
   getFetchOptions: getDeliverooFetchOptions,
+  getFallbackFetchOptions: getDeliverooFallbackFetchOptions,
+  isUsablePage: hasDeliverooMenuData,
   parse: (html: string, context: PlatformParseContext) => parseDeliverooMenu(html, context),
   getIdentityInputs: getDeliverooIdentityInputs,
   getAlternateUrls: result => result.restaurant?.alternateUrls ?? {},

@@ -49,6 +49,17 @@ function candidate(overrides: Partial<MatchCandidate['signals']> = {}, matchedPl
 }
 
 describe('identity signals and matcher (pure)', () => {
+  test('Deliveroo brand is derived from "Brand - Place"; near pins override a differing area label; "D.I.F.C." equals "DIFC"', () => {
+    const base = { city: 'dubai' } as const;
+    const deliveroo = extractSourceSignals({ platform: 'deliveroo', name: { en: 'Krave - DIFC' }, location: { ...base, area: 'D.I.F.C.', lat: 25.2131, lng: 55.2797 } } as unknown as DiningRestaurant);
+    assert.deepEqual(deliveroo.brands, ['krave']);
+    const talabat = extractSourceSignals({ platform: 'talabat', name: { en: 'Krave, DIFC' }, brandName: { en: 'Krave' }, location: { ...base, area: 'DIFC', lat: 25.2133, lng: 55.2798 } } as unknown as DiningRestaurant);
+    const near = evaluateCandidate(deliveroo, { groupId: new ObjectId(), signals: talabat, matchedPlatforms: ['talabat'] });
+    assert.ok(!near.evidence.conflicts.includes('AREA_MISMATCH'));
+    const far = evaluateCandidate({ ...deliveroo, lat: 25.3, lng: 55.4 }, { groupId: new ObjectId(), signals: talabat, matchedPlatforms: ['talabat'] });
+    assert.ok(far.evidence.conflicts.includes('LOCATION_FAR'));
+  });
+
   test('normalization folds case, punctuation, diacritics and Arabic letter variants', () => {
     assert.equal(normalizeIdentityText('  Kamat Vegetarian - Business Bay '), 'kamat vegetarian business bay');
     assert.equal(normalizeIdentityText('Café & Grill'), 'cafe and grill');
@@ -147,8 +158,11 @@ describe('identity signals and matcher (pure)', () => {
       return { groupId: new ObjectId(), signals, matchedPlatforms: [platform] };
     };
 
-    // As extracted: branch-specific names and no Deliveroo brand → no candidate at all.
-    assert.equal(decideMatch(goldenMile, [group(businessBay), group(palm)]).kind, 'new');
+    // As extracted: the Deliveroo brand is derived from "Brand - Place", so the Palm listing 39 m away is a candidate,
+    // but brand + location without a name match is only ever REVIEW, and Business Bay is never one.
+    const derived = decideMatch(goldenMile, [group(businessBay), group(palm)]);
+    assert.equal(derived.kind, 'review');
+    assert.equal(derived.evidence.distanceMeters, 39);
     assert.equal(decideMatch(palm, [group(businessBay)]).kind, 'new');
 
     // Even with a shared brand, Business Bay is a hard non-match (area and distance) and the Palm pair only reaches REVIEW.
@@ -373,7 +387,7 @@ describe('restaurant identity layer (local MongoDB)', { skip: LOCAL_DB_SKIP }, (
     assert.equal(group.identityStatus, 'auto');
     assert.ok(group.seedRestaurantId!.equals(kamat._id));
     assert.deepEqual(group.signals, {
-      names: ['kamat vegetarian business bay'], brands: [], city: 'dubai', area: 'dubai business bay',
+      names: ['kamat vegetarian business bay'], brands: ['kamat vegetarian'], city: 'dubai', area: 'dubai business bay',
       address: 'ground level bay avenue executive tower g dubai', ...KAMAT_PIN,
     });
 
@@ -524,7 +538,11 @@ describe('restaurant identity layer (local MongoDB)', { skip: LOCAL_DB_SKIP }, (
 
     test('an existing active mapping is never replaced implicitly, and never duplicated', async () => {
       const { palm, goldenMile, groupId } = await seedPalm();
+      // Backfill only proposes Golden Mile for the Palm group (REVIEW). Give it a group of its own, as an earlier
+      // decision would have, so there is an existing active mapping elsewhere to protect.
       await backfillRestaurantIdentity(repos, { restaurantIds: [goldenMile._id], now });
+      const ownGroup = await repos.groups.createFromSeed(buildGroupFromRestaurant(goldenMile, extractSourceSignals(goldenMile), now));
+      await assignRestaurantToGroup(repos, { restaurantId: goldenMile._id, groupId: ownGroup.group._id, replaceExisting: true, note: 'own group' }, now);
       const own = (await repos.mappings.findActiveByRestaurant(goldenMile._id))!;
       assert.ok(!own.canonicalRestaurantGroupId!.equals(groupId));
       const before = await snapshot();
@@ -539,7 +557,21 @@ describe('restaurant identity layer (local MongoDB)', { skip: LOCAL_DB_SKIP }, (
 
       await assignToAnchorGroup(repos, { ...input, replaceExisting: true, dryRun: false, expectedGroupId: groupId });
       const rows = await c.restaurantMappings.find({ restaurantId: goldenMile._id }).sort({ isActive: 1 }).toArray();
-      assert.deepEqual(rows.map(r => [r.matchStatus, r.isActive, r.evidence.reason]), [['REJECTED', false, 'REASSIGNED'], ['MATCHED', true, 'MANUAL_ASSIGNMENT']]);
+      assert.deepEqual(rows.map(r => [r.matchStatus, r.isActive, r.evidence.reason]), [['REJECTED', false, 'REASSIGNED'], ['REJECTED', false, 'REASSIGNED'], ['MATCHED', true, 'MANUAL_ASSIGNMENT']]);
+    });
+
+    test('the same menu widens the location check to 150 m, never further, and never on its own', async () => {
+      const { palm, groupId } = await seedPalm();
+      // ~111 m north of the Palm pin; ~222 m for the far one.
+      const near = await addRestaurant('deliveroo', '910001', 'Kamat Vegetarian - Palm', { city: 'dubai', area: 'The Palm Jumeirah', lat: 25.112222348578067, lng: 55.141854912966906 });
+      const far = await addRestaurant('deliveroo', '910002', 'Kamat Vegetarian - Palm 2', { city: 'dubai', area: 'The Palm Jumeirah', lat: 25.113222348578067, lng: 55.141854912966906 });
+      const input = { anchorRestaurantId: palm._id, note: 'duplicate', now };
+      await assert.rejects(assignToAnchorGroup(repos, { ...input, restaurantId: near._id }), refused('WEAK_BRANCH_EVIDENCE'));
+      await assert.rejects(assignToAnchorGroup(repos, { ...input, restaurantId: near._id, menuOverlap: 0.79 }), refused('WEAK_BRANCH_EVIDENCE'));
+      await assert.rejects(assignToAnchorGroup(repos, { ...input, restaurantId: far._id, menuOverlap: 1 }), refused('WEAK_BRANCH_EVIDENCE'));
+      const ok = await assignToAnchorGroup(repos, { ...input, restaurantId: near._id, menuOverlap: 0.9, dryRun: false, expectedGroupId: groupId });
+      assert.equal(ok.result.status, 'created');
+      assert.ok(ok.evidence.distanceMeters! > 75 && ok.evidence.distanceMeters! <= 150);
     });
 
     test('refusals: weak evidence, second listing of a platform, unmapped anchor, missing or oversized note', async () => {

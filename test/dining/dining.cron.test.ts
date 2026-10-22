@@ -232,8 +232,9 @@ describe('dining cron jobs (local MongoDB, fake Scrape.do)', { skip: LOCAL_DB_SK
     const { plan, restaurants } = await loadDiningCronPlan(cron, { maxTargets: 200 });
 
     assert.equal(plan.targets, 3);
-    assert.equal(plan.estimatedCredits, 15);
-    assert.deepEqual(plan.byPlatform, { deliveroo: { restaurants: 2, targets: 3, estimatedCredits: 15 } });
+    // Deliveroo menus are plain requests now: 1 credit each (5 when the rendered fallback is needed)
+    assert.equal(plan.estimatedCredits, 3);
+    assert.deepEqual(plan.byPlatform, { deliveroo: { restaurants: 2, targets: 3, estimatedCredits: 3 } });
     const kamat = restaurants.find(r => r.restaurantId === seeded._id!.toHexString())!;
     // Same URLs as the previous scrape (with the delivery-location query), not the bare stored page URL.
     assert.deepEqual(kamat.targets.map(x => [x.locale, x.url, x.urlSource]), [['en', FIXTURE_URL.en, 'lastRun'], ['ar', FIXTURE_URL.ar, 'lastRun']]);
@@ -355,7 +356,8 @@ describe('dining cron jobs (local MongoDB, fake Scrape.do)', { skip: LOCAL_DB_SK
     const ok = fakeScrapeDo(pageByLocale).client;
     const flaky: Pick<ScrapeDoClient, 'fetchHtml'> = {
       async fetchHtml(url, options) {
-        if (++calls === 1) throw new ScrapeDoError({ category: 'timeout', message: 'Scrape.do request timed out' });
+        // the plain request and its one rendered fallback both time out: the first attempt fails, the cron retries
+        if (++calls <= 2) throw new ScrapeDoError({ category: 'timeout', message: 'Scrape.do request timed out' });
         return ok.fetchHtml(url, options);
       },
     };
@@ -407,7 +409,10 @@ describe('dining cron jobs (local MongoDB, fake Scrape.do)', { skip: LOCAL_DB_SK
     const summary = await runDiningCronJob(deps(fake.client), { trigger: 'manual', config: testConfig({ maxConsecutiveFailures: 1 }) });
     assert.equal(summary.abortReason, 'TOO_MANY_CONSECUTIVE_FAILURES');
     assert.equal(summary.status, 'failed');
-    assert.equal(fake.calls.length, 1);
+    // a page with no menu data: the plain request, then exactly one rendered fallback, then the target fails
+    assert.equal(fake.calls.length, 2);
+    assert.equal(fake.calls[0].options?.render, false);
+    assert.equal(fake.calls[1].options?.render, true);
   });
 
   test('shutdown signal: finishes the current scrape, skips the rest, job ends "aborted"', async () => {

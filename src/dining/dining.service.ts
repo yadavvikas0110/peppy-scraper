@@ -20,6 +20,7 @@ import { DiningValidationError, validateRestaurant } from './dining.validator';
 import type { PlatformOffers } from './offers/offer.types';
 import { DiningMappedMenu, DiningMappingError, DiningMenuCompleteness } from './platforms/platform.mapper';
 import { DiningPlatformRegistry, getDiningPlatformModule, getSupportedDiningPlatforms } from './platforms/platform.registry';
+import type { DiningPlatformAdapter } from './platforms/platform.types';
 import { PLATFORM_REJECTION_CODES } from './platforms/platform.types';
 import { applyUpdate } from './repositories/document-update';
 import { DiningIdentityDowngradeError, issuesMessage } from './repositories/repository.types';
@@ -270,6 +271,36 @@ async function resolveRepositories(context: DiningScrapeContext): Promise<Dining
   }
 }
 
+// Fallback is only for failures a different kind of request can fix; never for missing credits, bad credentials or config.
+const FALLBACK_ERROR_CATEGORIES = new Set(['blocked', 'timeout', 'target_4xx', 'target_5xx', 'response']);
+
+/**
+ * The platform's normal request, and (when it defines one) a single costlier fallback request if the normal one fails
+ * or the page has no menu data. At most two requests per scrape; the cost recorded is the response used.
+ */
+async function fetchWithFallback(
+  client: Pick<ScrapeDoClient, 'fetchHtml'>,
+  adapter: DiningPlatformAdapter<unknown>,
+  request: DiningScrapeRequest,
+  logger: Pick<Console, 'log' | 'warn' | 'error'>
+): Promise<ScrapeDoResponse> {
+  const fallback = adapter.getFallbackFetchOptions?.(request.targetUrl, request.locale);
+  const tag = `[dining] ${request.platform} ${request.locale}`;
+  let response: ScrapeDoResponse;
+  try {
+    response = await client.fetchHtml(request.targetUrl, adapter.getFetchOptions(request.targetUrl, request.locale));
+  } catch (err) {
+    if (!fallback || !isScrapeDoError(err) || !FALLBACK_ERROR_CATEGORIES.has(err.category)) throw err;
+    logger.warn(`${tag}: the plain request failed (${err.category}); retrying once with the fallback request`);
+    return client.fetchHtml(request.targetUrl, fallback);
+  }
+  if (fallback && adapter.isUsablePage && !adapter.isUsablePage(response.html)) {
+    logger.warn(`${tag}: the plain page has no menu data; retrying once with the fallback request`);
+    return client.fetchHtml(request.targetUrl, fallback);
+  }
+  return response;
+}
+
 export async function runDiningScrape(input: unknown, context: DiningScrapeContext): Promise<DiningScrapeResult> {
   const now = context.now ?? (() => new Date());
   const logger = context.logger ?? console;
@@ -336,7 +367,7 @@ export async function runDiningScrape(input: unknown, context: DiningScrapeConte
     // 4–5. Platform fetch options → generic Scrape.do client
     let response: ScrapeDoResponse;
     try {
-      response = await context.scrapeDo.fetchHtml(request.targetUrl, adapter.getFetchOptions(request.targetUrl, request.locale));
+      response = await fetchWithFallback(context.scrapeDo, adapter, request, logger);
     } catch (err) {
       if (isScrapeDoError(err)) {
         fetch = sanitizeFetchMetadata({ statusCode: err.statusCode, initialStatusCode: err.initialStatusCode, attempts: err.attempts });

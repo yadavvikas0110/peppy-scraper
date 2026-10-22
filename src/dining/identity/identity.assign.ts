@@ -12,10 +12,16 @@ import type { DiningRestaurantMapping, MatchConflict, MatchSignal } from './iden
  * is refused when the two listings conflict as branches (city, area, coordinates > 500 m), when there
  * is no strong branch evidence (exact address or coordinates ≤ 75 m), or when the group already has
  * another listing on the same platform. Names, brands and prices are not evidence here.
+ *
+ * One exception to the 75 m rule: platforms often place the same shop's pin 100 m apart. When the caller has
+ * measured that the two menus are the same dishes (menuOverlap ≥ 80%) the pins may be up to 150 m apart. A chain's
+ * branches share a menu, so the menu never replaces the location check, it only widens it a little.
  */
 
 export const MAX_NOTE_LENGTH = 500;
 const STRONG_BRANCH_SIGNALS: readonly MatchSignal[] = ['ADDRESS_EXACT', 'LOCATION_NEAR'];
+export const MENU_EVIDENCE_MIN_OVERLAP = 0.8;
+export const MENU_EVIDENCE_MAX_METERS = 150;
 
 export type ManualAssignmentRefusal =
   | 'SAME_RESTAURANT'
@@ -45,6 +51,8 @@ export interface ManualAssignmentInput {
   // Required for a write: the group ID the reviewer saw in the dry run.
   expectedGroupId?: ObjectId;
   replaceExisting?: boolean;
+  // Share (0–1) of the smaller menu's dishes found by name on the other menu, measured by the caller.
+  menuOverlap?: number;
   dryRun?: boolean;
   now?: Date;
 }
@@ -118,8 +126,13 @@ export async function assignToAnchorGroup(repos: DiningIdentityRepositories, inp
   if (hard.length) {
     throw new DiningManualAssignmentError('BRANCH_CONFLICT', `${listing(restaurant)} and ${listing(anchor)} are different branches (${hard.join(', ')})`);
   }
-  if (!branch.signals.some(s => STRONG_BRANCH_SIGNALS.includes(s))) {
-    throw new DiningManualAssignmentError('WEAK_BRANCH_EVIDENCE', 'Needs an exact address or coordinates within 75 m');
+  const sameMenuNearby =
+    input.menuOverlap !== undefined &&
+    input.menuOverlap >= MENU_EVIDENCE_MIN_OVERLAP &&
+    branch.distanceMeters !== undefined &&
+    branch.distanceMeters <= MENU_EVIDENCE_MAX_METERS;
+  if (!branch.signals.some(s => STRONG_BRANCH_SIGNALS.includes(s)) && !sameMenuNearby) {
+    throw new DiningManualAssignmentError('WEAK_BRANCH_EVIDENCE', 'Needs an exact address, coordinates within 75 m, or the same menu within 150 m');
   }
 
   const members = await repos.mappings.findActiveByGroup(groupId);
