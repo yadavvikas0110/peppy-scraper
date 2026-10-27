@@ -4,3 +4,6 @@ output/
 .env
 .DS_Store
 .claude/
+
+# local development overrides (point at the dev database, never committed)
+.env.dev

@@ -1,0 +1,36 @@
+{
+  "platform": "talabat",
+  "locale": "en",
+  "url": "https://www.talabat.com/uae/restaurant/773429/kamat-vegetarian-the-palm-jumeirah?aid=1333",
+  "capturedAt": "2026-10-09T10:18:02.614Z",
+  "scrapeDoOptions": {},
+  "statusCode": 200,
+  "initialStatusCode": 200,
+  "finalUrl": "https://www.talabat.com/uae/restaurant/773429/kamat-vegetarian-the-palm-jumeirah?aid=1333",
+  "requestCost": 1,
+  "remainingCredits": 889,
+  "attempts": 1,
+  "durationMs": 3943,
+  "rawBytes": 720152,
+  "fixtureBytes": 363045,
+  "sanitized": {
+    "dropped": [
+      "props.userIpAddress",
+      "props.hostName",
+      "props.initialI18nStore",
+      "props.i18nServerInstance",
+      "props.initialReduxState",
+      "props.pageProps.gtmEventData",
+      "props.pageProps.namespacesRequired",
+      "buildId",
+      "initialMenuState.orderKillExperimentData",
+      "initialMenuState.sbExperimentData",
+      "initialMenuState.availablePaymentMethods",
+      "initialMenuState.promotions",
+      "restaurant.availablePaymentMethods",
+      "menuData.filteredCategories",
+      "currentCountry (all but id/slug/name/code/ISO/currency/languages)",
+      "keys matching token|session|cookie|password|secret|email|phone|ipAddress"
+    ]
+  }
+}
