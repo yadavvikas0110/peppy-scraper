@@ -1,15 +1,18 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
-import { scrapeBulk, closeBrowser } from '../services/playwright.service';
+import { scrapeBulk, closeBrowser, withoutEmbeddings } from '../services/playwright.service';
 import { pushToDatabase } from './push-pipeline';
 import { BundledProduct } from '../parsers/types';
 import { SiteKey } from '../config/sites';
 import { acquireLock, releaseLock, shouldStop, clearStopSignal } from '../utils/stop-signal';
+import { buildJobId, deleteCheckpoint } from '../services/checkpoint.service';
+import { SCRAPER_API_KEY_HEADER } from '../utils/api-key';
 
 async function reportStatus(success: boolean, productCount: number, errorCount: number, responseTimeMs: number, error?: string): Promise<void> {
   const beUrl = process.env.PEPPY_BE_URL;
   if (!beUrl) return;
+  const apiKey = process.env.SCRAPER_API_KEY;
   try {
     await axios.post(`${beUrl}/api/v1/admin/scraper/status`, {
       source: 'cron',
@@ -17,14 +20,12 @@ async function reportStatus(success: boolean, productCount: number, errorCount: 
       responseTime: responseTimeMs,
       productCount,
       ...(error ? { error } : {}),
-    }, { timeout: 10000 });
+    }, { timeout: 10000, headers: apiKey ? { [SCRAPER_API_KEY_HEADER]: apiKey } : {} });
     console.log(`[demo] Status reported to peppy-be (success=${success}, products=${productCount})`);
   } catch (e: any) {
     console.warn(`[demo] Failed to report status: ${e.message}`);
   }
 }
-
-const CHECKPOINT_DIR = path.join(process.cwd(), 'output', 'checkpoints');
 
 export const DEMO_SITES: SiteKey[] = ['amazon', 'noon', 'carrefour', 'sharafdg'];
 export const DEMO_COUNT = 5;
@@ -37,19 +38,11 @@ export const DEMO_QUERIES = [
   { label: 'PlayStation 5',    category: 'playstation 5 ps5',      broadCategory: 'Electronics', subCategory: 'Gaming',             sites: DEMO_SITES, count: DEMO_COUNT },
 ];
 
+// Checkpoint files are named by hashed job ID, so derive the IDs rather than matching filenames
 function clearDemoCheckpoints(): void {
-  if (!fs.existsSync(CHECKPOINT_DIR)) return;
-  let cleared = 0;
-  for (const file of fs.readdirSync(CHECKPOINT_DIR)) {
-    const isMine = DEMO_QUERIES.some(q =>
-      file.includes(q.category.replace(/[^a-z0-9]/gi, '_'))
-      || file.includes(q.category.replace(/\s+/g, '-'))
-    );
-    if (isMine) {
-      try { fs.unlinkSync(path.join(CHECKPOINT_DIR, file)); cleared++; } catch {}
-    }
+  for (const q of DEMO_QUERIES) {
+    try { deleteCheckpoint(buildJobId(q.sites, q.category, q.count)); } catch {}
   }
-  if (cleared > 0) console.log(`[demo] Cleared ${cleared} stale checkpoint(s).`);
 }
 
 export async function runDemoPipeline(): Promise<void> {
@@ -114,7 +107,7 @@ export async function runDemoPipeline(): Promise<void> {
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const backupPath = path.join(process.cwd(), 'output', `demo_${ts}.json`);
     fs.mkdirSync(path.dirname(backupPath), { recursive: true });
-    fs.writeFileSync(backupPath, JSON.stringify({ generatedAt: new Date().toISOString(), totalBundles: allBundles.length, bundles: allBundles }, null, 2));
+    fs.writeFileSync(backupPath, JSON.stringify({ generatedAt: new Date().toISOString(), totalBundles: allBundles.length, bundles: withoutEmbeddings(allBundles) }));
     console.log(`[demo] Backup → ${backupPath}`);
 
     console.log(`\n[demo] Pushing ${allBundles.length} bundles to MongoDB...`);

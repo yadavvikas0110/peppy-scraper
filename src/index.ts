@@ -1,18 +1,19 @@
+// Must stay the first import: several modules read process.env when they are loaded
+import 'dotenv/config';
 import express from 'express';
 import * as http from 'http';
-import dotenv from 'dotenv';
 import cron from 'node-cron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { scrapeProduct, scrapeCategory } from './services/scrape.do.service';
-import { scrapeBulk, closeBrowser } from './services/playwright.service';
+import { scrapeBulk, closeBrowser, withoutEmbeddings } from './services/playwright.service';
 import { SiteKey } from './config/sites';
 import { runFullPipeline } from './cron/cron-runner';
 import { runDemoPipeline } from './cron/demo-runner';
 import { attachLogServer, interceptConsole, getLogs } from './logger';
 import { LOCK_FILE, STOP_FILE, readLock } from './utils/stop-signal';
+import { requireScraperApiKey, isApiKeyEnforced } from './utils/api-key';
 
-dotenv.config();
 interceptConsole();
 
 const app = express();
@@ -22,8 +23,15 @@ app.use(express.json());
 app.get('/', async (req, res) => {
 
     res.json({status:"peppy cron is running"});
- 
+
 });
+
+// Everything below `/` spends scraping credits or exposes logs
+app.use(requireScraperApiKey);
+if (!isApiKeyEnforced()) {
+  console.warn('[auth] SCRAPER_API_KEY is not set — scraper endpoints are open to anyone who can reach this port.');
+}
+
 app.get('/scrape', async (req, res) => {
   const { url } = req.query;
 
@@ -70,7 +78,7 @@ app.get('/scrape-category', async (req, res) => {
 const VALID_SITES: SiteKey[] = ['amazon', 'noon', 'carrefour', 'sharafdg', 'jumbo', 'mumzworld', 'namshi', 'letstango'];
 
 app.post('/scrape-bulk', async (req, res) => {
-  const { site, sites: sitesParam, category, broadCategory, subCategory, count } = req.body;
+  const { site, sites: sitesParam, category, categoryKey, broadCategory, subCategory, count } = req.body;
 
   // Accept `sites` (array) or `site` (single string, backward compat)
   let requestedSites: string[] = [];
@@ -104,6 +112,7 @@ app.post('/scrape-bulk', async (req, res) => {
     const result = await scrapeBulk({
       sites: requestedSites as SiteKey[],
       category: category.trim(),
+      categoryKey: typeof categoryKey === 'string' && categoryKey.trim() ? categoryKey.trim() : undefined,
       broadCategory: typeof broadCategory === 'string' ? broadCategory.trim() : undefined,
       subCategory: typeof subCategory === 'string' ? subCategory.trim() : undefined,
       count,
@@ -121,7 +130,7 @@ app.post('/scrape-bulk', async (req, res) => {
       bundleCount: result.bundleCount,
       errorCount: result.errors.length,
       outputFile: result.outputFile,
-      bundles: result.bundles,
+      bundles: withoutEmbeddings(result.bundles),
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

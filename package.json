@@ -11,6 +11,7 @@
     "start:dining": "node dist/src/dining-server.js",
     "test:scrapedo": "node --require ts-node/register --test test/shared/scrapedo/scrapedo.client.test.ts",
     "test:dining": "node --require ts-node/register --test test/dining/*.test.ts test/shared/db/*.test.ts",
+    "test:ecommerce": "node --require ts-node/register --test test/ecommerce/*.test.ts",
     "dining:indexes": "node dist/src/dining/db/dining.ensure-indexes.js",
     "dining:identity-backfill": "node dist/src/dining/identity/identity.backfill.cli.js",
     "dining:identity-assign": "node dist/src/dining/identity/identity.assign.cli.js",

@@ -1,7 +1,7 @@
 /**
  * push-to-mongodb.ts
  *
- * Flushes products_clean collection and repopulates from master JSON.
+ * Merges products from master JSON into products_clean (no flush — see pushToDatabase).
  * Also generates OpenAI embeddings and pushes to ChromaDB.
  *
  * Usage: npx ts-node push-to-mongodb.ts [path-to-master-json]

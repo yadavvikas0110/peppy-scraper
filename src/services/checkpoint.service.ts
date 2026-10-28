@@ -21,8 +21,10 @@ export interface CheckpointData {
 
 const CHECKPOINT_DIR = path.join(process.cwd(), 'output', 'checkpoints');
 
-export function buildJobId(sites: SiteKey[], category: string, countPerSite: number): string {
-  const key = [...sites].sort().join(',') + '|' + category.toLowerCase().trim() + '|' + countPerSite;
+export function buildJobId(sites: SiteKey[], category: string, countPerSite: number, categoryKey?: string): string {
+  let key = [...sites].sort().join(',') + '|' + category.toLowerCase().trim() + '|' + countPerSite;
+  // Appended only when set, so existing search-based checkpoints keep their IDs
+  if (categoryKey) key += '|' + categoryKey;
   return crypto.createHash('md5').update(key).digest('hex').slice(0, 12);
 }
 

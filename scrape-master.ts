@@ -11,7 +11,7 @@ dotenv.config();
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { scrapeBulk } from './src/services/playwright.service';
+import { scrapeBulk, withoutEmbeddings } from './src/services/playwright.service';
 import { closeBrowser } from './src/services/playwright.service';
 import { BundledProduct } from './src/parsers/types';
 import { SiteKey } from './src/config/sites';
@@ -32,6 +32,11 @@ export interface QueryPlan {
   subCategory: string;      // sub-level taxonomy (e.g. "Smartphones")
   sites: SiteKey[];
   count: number;
+}
+
+// Unique per query — several queries share a `category` string (e.g. 'smartphones' on Jumbo and SharafDG)
+export function queryKey(q: QueryPlan): string {
+  return [q.category.toLowerCase().trim(), [...q.sites].sort().join(','), q.categoryKey ?? ''].join('|');
 }
 
 export const QUERIES: QueryPlan[] = [
@@ -193,7 +198,7 @@ const MASTER_STATE_PATH = path.join(process.cwd(), 'output', 'master_state.json'
 
 interface MasterState {
   startedAt: string;
-  completedQueries: string[];         // category strings that finished
+  completedQueries: string[];         // queryKey() of each finished query
   allBundles: BundledProduct[];
   totalRawScraped: number;
   totalErrors: number;
@@ -216,7 +221,7 @@ function loadState(): MasterState {
 
 function saveState(state: MasterState): void {
   fs.mkdirSync(path.dirname(MASTER_STATE_PATH), { recursive: true });
-  fs.writeFileSync(MASTER_STATE_PATH, JSON.stringify(state, null, 2));
+  fs.writeFileSync(MASTER_STATE_PATH, JSON.stringify({ ...state, allBundles: withoutEmbeddings(state.allBundles) }));
 }
 
 // ─── Progress banner ──────────────────────────────────────────────────────────
@@ -247,7 +252,7 @@ async function main() {
   for (const query of QUERIES) {
     queryIndex++;
 
-    if (state.completedQueries.includes(query.category)) {
+    if (state.completedQueries.includes(queryKey(query))) {
       console.log(`[master] Skipping "${query.label}" — already done.`);
       continue;
     }
@@ -276,7 +281,7 @@ async function main() {
       state.allBundles.push(...result.bundles);
       state.totalRawScraped += result.totalScraped;
       state.totalErrors += result.errors.length;
-      state.completedQueries.push(query.category);
+      state.completedQueries.push(queryKey(query));
       saveState(state);
 
       console.log(`[master] "${query.label}" done — ${result.bundleCount} bundles, ${result.totalScraped} raw.`);
@@ -302,7 +307,7 @@ async function main() {
     bundles: state.allBundles,
   };
 
-  fs.writeFileSync(outputPath, JSON.stringify(finalOutput, null, 2));
+  fs.writeFileSync(outputPath, JSON.stringify({ ...finalOutput, bundles: withoutEmbeddings(finalOutput.bundles) }));
   console.log(`\n[master] Final output saved → ${outputPath}`);
   console.log(`[master] Total bundles: ${state.allBundles.length} | Raw products: ${state.totalRawScraped}`);
 

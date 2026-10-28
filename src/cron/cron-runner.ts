@@ -1,41 +1,55 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
-import { scrapeBulk, closeBrowser } from '../services/playwright.service';
-import { pushToDatabase } from './push-pipeline';
-import { QUERIES } from '../../scrape-master';
+import { scrapeBulk, closeBrowser, withoutEmbeddings } from '../services/playwright.service';
+import { pushToDatabase, markStaleOffers } from './push-pipeline';
+import { QUERIES, queryKey } from '../../scrape-master';
 import { BundledProduct } from '../parsers/types';
 import { acquireLock, releaseLock, shouldStop, clearStopSignal } from '../utils/stop-signal';
+import { SCRAPER_API_KEY_HEADER } from '../utils/api-key';
 
 const STATE_FILE = path.join(process.cwd(), 'output', 'cron_state.json');
 
 const PARALLEL_QUERIES = Math.max(1, parseInt(process.env.PARALLEL_QUERIES || '3', 10));
 
+// A resume state older than this is from a previous day's crashed run — its prices are stale
+const STATE_MAX_AGE_MS = Math.max(1, parseFloat(process.env.CRON_STATE_MAX_AGE_HOURS || '20')) * 3600 * 1000;
+
 interface CronState {
   startedAt: string;
-  completedQueries: string[];
+  completedQueries: string[];   // queryKey() of each finished query
   allBundles: BundledProduct[];
   totalRawScraped: number;
   totalErrors: number;
 }
 
+function freshState(): CronState {
+  return { startedAt: new Date().toISOString(), completedQueries: [], allBundles: [], totalRawScraped: 0, totalErrors: 0 };
+}
 
 function loadCronState(): CronState {
   if (fs.existsSync(STATE_FILE)) {
-    try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch {}
+    try {
+      const state: CronState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+      const age = Date.now() - new Date(state.startedAt).getTime();
+      if (age >= 0 && age < STATE_MAX_AGE_MS) return state;
+      console.warn(`[cron] Discarding resume state from ${state.startedAt} — older than ${STATE_MAX_AGE_MS / 3600000}h.`);
+    } catch {}
   }
-  return { startedAt: new Date().toISOString(), completedQueries: [], allBundles: [], totalRawScraped: 0, totalErrors: 0 };
+  return freshState();
 }
 
 function saveCronState(state: CronState): void {
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+  // Embeddings are dropped on disk; pushToDatabase re-embeds bundles that lack one after a resume
+  fs.writeFileSync(STATE_FILE, JSON.stringify({ ...state, allBundles: withoutEmbeddings(state.allBundles) }));
 }
 
 async function reportStatus(success: boolean, productCount: number, errorCount: number, responseTimeMs: number, error?: string): Promise<void> {
   const beUrl = process.env.PEPPY_BE_URL;
   if (!beUrl) return;
 
+  const apiKey = process.env.SCRAPER_API_KEY;
   try {
     await axios.post(`${beUrl}/api/v1/admin/scraper/status`, {
       source: 'cron',
@@ -43,7 +57,7 @@ async function reportStatus(success: boolean, productCount: number, errorCount: 
       responseTime: responseTimeMs,
       productCount,
       ...(error ? { error } : {}),
-    }, { timeout: 10000 });
+    }, { timeout: 10000, headers: apiKey ? { [SCRAPER_API_KEY_HEADER]: apiKey } : {} });
     console.log(`[cron] Status reported to peppy-be (success=${success}, products=${productCount})`);
   } catch (e: any) {
     console.warn(`[cron] Failed to report status to peppy-be: ${e.message}`);
@@ -67,14 +81,16 @@ export async function runFullPipeline(): Promise<void> {
   console.log(`[cron] ══════════════════════════════════════════════════\n`);
 
   let fatalError: string | undefined;
+  let stopped = false;
 
   try {
-    const pending = QUERIES.filter(q => !state.completedQueries.includes(q.category));
+    const pending = QUERIES.filter(q => !state.completedQueries.includes(queryKey(q)));
     console.log(`[cron] ${pending.length} queries to run (${PARALLEL_QUERIES} parallel)\n`);
 
     for (let i = 0; i < pending.length; i += PARALLEL_QUERIES) {
       if (shouldStop()) {
         clearStopSignal();
+        stopped = true;
         console.log('[cron] ⛔ Stop signal received — aborting pipeline.');
         break;
       }
@@ -88,6 +104,7 @@ export async function runFullPipeline(): Promise<void> {
         batch.map(query => scrapeBulk({
           sites: query.sites,
           category: query.category,
+          categoryKey: query.categoryKey,
           broadCategory: query.broadCategory,
           subCategory: query.subCategory,
           count: query.count,
@@ -102,7 +119,7 @@ export async function runFullPipeline(): Promise<void> {
           state.allBundles.push(...result.bundles);
           state.totalRawScraped += result.totalScraped;
           state.totalErrors += result.errors.length;
-          state.completedQueries.push(query.category);
+          state.completedQueries.push(queryKey(query));
           console.log(`[cron] "${query.label}" done — ${result.bundleCount} bundles.`);
         } else {
           console.error(`[cron] "${query.label}" FAILED: ${outcome.reason?.message}`);
@@ -123,6 +140,12 @@ export async function runFullPipeline(): Promise<void> {
     console.log(`[cron] Push complete — MongoDB: ${pushResult.mongoInserted} new, ${pushResult.mongoUpdated} updated | ChromaDB: ${pushResult.chromaVectors}`);
     if (pushResult.errors.length > 0) {
       console.warn(`[cron] Push errors: ${pushResult.errors.join('; ')}`);
+    }
+
+    // Only a complete run has seen every offer it would refresh — a stopped run must not expire offers
+    if (!stopped) {
+      const staleCount = await markStaleOffers();
+      console.log(`[cron] Marked ${staleCount} stale offer(s) out of stock.`);
     }
 
     // Clear cron state on success so next run is fresh

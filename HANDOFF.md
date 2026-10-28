@@ -32,24 +32,29 @@ Sites scrape actual category browse pages — not product-specific search terms.
 
 ### Data Pipeline
 ```
-Category page → link collection → per-product scrape (3 retries, no-image = skip)
-→ bundler (Jaccard similarity 0.45 dedupe across sites)
-→ vector tagger (OpenAI text-embedding-3-small)
-→ ChromaDB upsert
-→ MongoDB products_clean (flush + reinsert on full run)
+Category page (categoryKey) or search → link collection → per-product scrape
+→ bundler (Jaccard ≥ 0.45 AND matching variant attributes: Pro/Max/Ultra/Plus…, storage, screen size, model number)
+→ vector tagger (OpenAI text-embedding-3-small; optional — scraping continues with base tags if OpenAI fails)
+→ cross-query dedupe → MongoDB products_clean MERGE (no flush) → ChromaDB upsert
+→ stale offers (not seen for STALE_OFFER_DAYS) marked inStock:false
 ```
 
 ### Key Design Decisions
+- **Merge, never flush**: products match by `name` or any `retailers.productUrl`. Only this run's retailers' offers are replaced (by `retailerId`); other retailers' offers and extra offer fields (`variants`, `retailerLogo`, `originalPrice`) are kept. `name`/`category`/`images`/`brand` are only filled when missing, so admin edits and S3-migrated images survive. Backend-owned fields (`productRole`, variant grouping) are never written.
+- **Target database**: `MONGODB_DB` → database in `MONGODB_URI` path → `peppy` (same rule as the dining module).
+- **Stale offers**: offers this scraper wrote carry `lastSeenAt`; after a complete run, offers unseen for `STALE_OFFER_DAYS` (default 3) are marked out of stock and restored when seen again. Offers from other importers are never touched.
 - **Multi-image**: each parser collects all image angles; bundler picks retailer with MOST images (no cross-retailer merging)
-- **No-image rejection**: products with zero images are retried 3× then moved to `checkpoint.failed` — never pushed to DB
-- **Checkpoint system**: each scrape job is resumable via `output/checkpoints/{jobId}.json`
-- **Taxonomy**: `broadCategory` + `subCategory` stamped on each product at scrape time; `inferTaxonomy()` as fallback regex
+- **No-image rejection**: pages that load without a name/price or image are re-fetched up to 3×, then moved to `checkpoint.failed` — never pushed to DB. Network errors are retried once inside `scrapeProductBD` (no stacked retries).
+- **Browser sessions**: one Bright Data Scraping Browser session per hostname (a shared session hits `navigate_domains_limit`). Hosts Bright Data refuses (robots.txt/KYC — currently Noon) are skipped for the rest of the run after the first refusal. Anti-bot block pages (Akamai "Access Denied" etc.) are retried on a fresh session instead of being treated as empty listings.
+- **Checkpoint system**: each scrape job is resumable via `output/checkpoints/{jobId}.json`; cron resume state older than `CRON_STATE_MAX_AGE_HOURS` (default 20) is discarded. Files on disk never include embeddings.
+- **Taxonomy**: `broadCategory` + `subCategory` stamped on each product at scrape time; `inferTaxonomy()` as fallback regex. Every pair used in `QUERIES` must exist in `src/config/taxonomy.ts` (enforced by `test/ecommerce/config.test.ts`).
+- **Auth**: set `SCRAPER_API_KEY` (same value in peppy-be) to require `x-api-key` on every route except `/`, and `?key=` on `/ws/logs`. Unset = open (a startup warning is logged).
 
 ### Cron Job
 - File: `src/cron/cron-runner.ts`
 - Registered in `src/index.ts` on startup when `ENABLE_CRON=true`
 - Loops all `QUERIES` from `scrape-master.ts` sequentially with 15s cooldown between queries
-- After all queries: calls `pushToDatabase()` → flushes and reinserts `products_clean`
+- After all queries: calls `pushToDatabase()` → merges into `products_clean` (see Key Design Decisions), then `markStaleOffers()`
 - Posts status to `PEPPY_BE_URL/api/admin/scraper/status` on completion
 - Lock file: `output/cron.lock` prevents overlapping runs
 
@@ -61,8 +66,13 @@ MONGODB_URI=...
 OPENAI_API_KEY=...
 BRIGHTDATA_...=...
 PEPPY_BE_URL=https://api.peppy.ae
-CHROMA_URL=...             # optional
+CHROMA_API_KEY / CHROMA_TENANT / CHROMA_DATABASE=...   # optional
+SCRAPER_API_KEY=...        # shared with peppy-be; enables endpoint auth
+MONGODB_DB=...             # optional; defaults to the database in MONGODB_URI
 ```
+
+### Tests
+`npm run test:ecommerce` — bundler variant guards, push merge pipeline, query plan/taxonomy consistency, parsers, API key.
 
 ### Scripts
 | Script | Purpose |
@@ -71,8 +81,8 @@ CHROMA_URL=...             # optional
 | `npx ts-node scrape-master.ts` | Manual full scrape (all queries) |
 | `npx ts-node scrape-category-test.ts` | Test category scraping across all 8 sites (10 products each) |
 | `npx ts-node scrape-test.ts` | Smoke test all sites (10 products each) |
-| `npx ts-node push-to-mongodb.ts <file.json>` | Manual push JSON output to MongoDB |
-| `npx ts-node add-to-mongodb.ts <file.json>` | Upsert without flushing collection |
+| `npx ts-node push-to-mongodb.ts [file.json]` | Merge a master JSON into MongoDB (defaults to latest `master_*.json`) |
+| `npx ts-node add-to-mongodb.ts <file.json>` | Merge any output JSON into MongoDB (same merge as cron) |
 
 ### Deployment
 - **Repo:** https://github.com/applore-shikhar/peppy-scraper.git

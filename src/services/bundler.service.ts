@@ -1,8 +1,6 @@
-import * as crypto from 'crypto';
 import { ProductData, RetailerOffer, BundledProduct } from '../parsers/types';
 import { SiteKey } from '../config/sites';
 import { tagBundleWithVectors, getBundleEmbedding } from './vector-tagger.service';
-import { isChromaAvailable, upsertProductsBatch, ChromaProductDoc } from './chroma.service';
 
 const RETAILER_DISPLAY_NAMES: Record<SiteKey, string> = {
   amazon:     'Amazon',
@@ -48,8 +46,55 @@ function jaccardSimilarity(a: string, b: string): number {
   return union === 0 ? 0 : intersection / union;
 }
 
-function nameHash(name: string): string {
-  return crypto.createHash('sha256').update(normalize(name)).digest('hex').slice(0, 24);
+// ── Variant guards ────────────────────────────────────────────────────────────
+// Token overlap alone merges different models ("Galaxy S24 Ultra 256GB" vs "Galaxy S25
+// Ultra 256GB" scores 0.78). These attributes must agree before two names can bundle.
+
+const QUALIFIERS = new Set(['pro', 'max', 'ultra', 'plus', 'mini', 'lite', 'fe', 'air', 'fold', 'flip']);
+const STORAGE_RE = /(\d+(?:\.\d+)?)\s*(gb|tb)\b/g;
+const SCREEN_RE = /(\d{2,3}(?:\.\d)?)\s*(?:"|''|-?\s*inch(?:es)?\b|in\b)/;
+// Spec tokens that are not model identifiers (5g, 4k, 120hz, 5000mah, 1.7l, ...)
+const UNIT_TOKEN_RE = /^\d+(?:\.\d+)?(?:g|k|hz|mah|w|mp|l|ml|kg|cm|mm|m|v|nm|th|nd|rd|st|x)$/;
+
+export interface VariantSignature {
+  qualifiers: string;      // sorted, space-joined
+  storageGb: number | null;
+  screenInch: number | null;
+  modelTokens: Set<string>;
+}
+
+export function variantSignature(name: string): VariantSignature {
+  let s = name.toLowerCase().replace(/\+/g, ' plus ');
+
+  let storageGb: number | null = null;
+  for (const m of s.matchAll(STORAGE_RE)) {
+    const gb = parseFloat(m[1]) * (m[2] === 'tb' ? 1024 : 1);
+    // Largest capacity is storage; smaller ones are usually RAM ("8GB RAM, 256GB")
+    if (storageGb === null || gb > storageGb) storageGb = gb;
+  }
+  s = s.replace(STORAGE_RE, ' ');
+
+  const screen = s.match(SCREEN_RE);
+  const screenInch = screen ? parseFloat(screen[1]) : null;
+  if (screen) s = s.replace(SCREEN_RE, ' ');
+
+  const tokens = s.replace(/[^\w\s.]/g, ' ').split(/\s+/).map(t => t.replace(/^\.+|\.+$/g, '')).filter(Boolean);
+  const qualifiers = [...new Set(tokens.filter(t => QUALIFIERS.has(t)))].sort().join(' ');
+  const modelTokens = new Set(tokens.filter(t => /\d/.test(t) && !UNIT_TOKEN_RE.test(t) && t.length <= 12));
+
+  return { qualifiers, storageGb, screenInch, modelTokens };
+}
+
+export function variantsCompatible(a: string, b: string): boolean {
+  const sa = variantSignature(a);
+  const sb = variantSignature(b);
+  if (sa.qualifiers !== sb.qualifiers) return false;
+  if (sa.storageGb !== null && sb.storageGb !== null && sa.storageGb !== sb.storageGb) return false;
+  if (sa.screenInch !== null && sb.screenInch !== null && sa.screenInch !== sb.screenInch) return false;
+  // Model numbers must overlap when both names have them (S24 vs S25, iPhone 15 vs 16).
+  // Extra codes on one side (e.g. "SM-S921B") are fine as long as one token is shared.
+  if (sa.modelTokens.size > 0 && sb.modelTokens.size > 0 && ![...sa.modelTokens].some(t => sb.modelTokens.has(t))) return false;
+  return true;
 }
 
 export async function bundleProducts(
@@ -81,7 +126,7 @@ export async function bundleProducts(
     for (const bundle of bundles) {
       if (!bundle.name) continue;
       const sim = jaccardSimilarity(data.productName, bundle.name);
-      if (sim >= SIMILARITY_THRESHOLD && sim > bestSim) {
+      if (sim >= SIMILARITY_THRESHOLD && sim > bestSim && variantsCompatible(data.productName, bundle.name)) {
         const alreadyHasRetailer = bundle.retailers.some(r => r.retailerId === site);
         if (!alreadyHasRetailer) {
           bestMatch = bundle;
@@ -154,36 +199,11 @@ export async function bundleProducts(
     bundle.tags = await tagBundleWithVectors(bundle, broadCategory, subCategory);
   }
 
-  // Generate bundle embeddings + store in ChromaDB
-  const chromaEnabled = isChromaAvailable();
-  const chromaDocs: ChromaProductDoc[] = [];
-
+  // Generate bundle embeddings. ChromaDB is written once, by pushToDatabase, after
+  // cross-query dedupe — writing here too created a second vector per product.
   for (const bundle of bundles) {
     const embedding = await getBundleEmbedding(bundle);
-    if (embedding) {
-      bundle.embedding = embedding;
-      if (chromaEnabled && bundle.name) {
-        chromaDocs.push({
-          id:            nameHash(bundle.name),
-          name:          bundle.name,
-          broadCategory,
-          subCategory,
-          tags:          bundle.tags,
-          lowestPrice:   bundle.lowestPrice,
-          highestPrice:  bundle.highestPrice,
-          retailerCount: bundle.retailerCount,
-          embedding,
-        });
-      }
-    }
-  }
-
-  if (chromaDocs.length > 0) {
-    try {
-      await upsertProductsBatch(chromaDocs);
-    } catch (e: any) {
-      console.warn(`[bundler] ChromaDB upsert failed: ${e.message}`);
-    }
+    if (embedding) bundle.embedding = embedding;
   }
 
   // Sort: most retailers first, then lowest price

@@ -7,6 +7,7 @@ import {
   fetchHTMLViaBrowser,
   closeBrowserPool,
   resetBrowser,
+  isAccessDeniedError,
 } from './brightdata.service';
 import { SITES, SiteKey } from '../config/sites';
 import { bundleProducts } from './bundler.service';
@@ -27,19 +28,46 @@ export { closeBrowserPool as closeBrowser };
 const STATIC_SEARCH_HOSTS = /amazon\.ae/;
 const PRODUCT_LINK_SELECTORS = ['a[href*="/dp/"]', 'a[href*="/p/"]', 'a[data-pjax][href*="/product/"]'].join(', ');
 
-let taggerReady = false;
+// Errors that retrying cannot fix: routing failures, timeouts, Bright Data access refusals
+const NO_RETRY_RE = /no_peer|probe_timeout|a2a_tun_open|a2a_exception|ERR_TUNNEL_CONNECTION_FAILED|Timeout \d+ms exceeded|Host blocked by Bright Data/i;
 
-async function ensureTagger(): Promise<void> {
-  if (taggerReady) return;
-  await initVectorTagger();
-  if (isChromaAvailable()) {
+function isNonRetryable(message: string): boolean {
+  return NO_RETRY_RE.test(message) || isAccessDeniedError(message);
+}
+
+// Anti-bot interstitials (Akamai, Cloudflare, captchas) — the site refused this session,
+// which is not the same as an empty listing page
+const BLOCK_PAGE_TITLE_RE = /^\s*(access denied|attention required|just a moment|are you a robot|pardon our interruption|request blocked|captcha)/i;
+
+export function isBlockPage(html: string): boolean {
+  const title = html.match(/<title[^>]*>([^<]*)/i)?.[1] ?? '';
+  return BLOCK_PAGE_TITLE_RE.test(title) || (html.length < 3000 && /errors\.edgesuite\.net|cf-chl-|captcha-delivery/i.test(html));
+}
+
+// Shared by concurrent queries so the tagger and Chroma are initialised only once
+let taggerInit: Promise<void> | null = null;
+
+function ensureTagger(): Promise<void> {
+  return taggerInit ??= (async () => {
+    // Tagging is optional: an OpenAI failure (e.g. no credits) must not stop scraping
     try {
-      await connectChroma();
+      await initVectorTagger();
     } catch (e: any) {
-      console.warn(`[chroma] Connection failed — vector store disabled: ${e.message}`);
+      console.warn(`[vector-tagger] Init failed — continuing with base tags only: ${e.message}`);
     }
-  }
-  taggerReady = true;
+    if (isChromaAvailable()) {
+      try {
+        await connectChroma();
+      } catch (e: any) {
+        console.warn(`[chroma] Connection failed — vector store disabled: ${e.message}`);
+      }
+    }
+  })();
+}
+
+// Embeddings are 1536 floats per bundle — keep them out of files written to disk
+export function withoutEmbeddings(bundles: BundledProduct[]): BundledProduct[] {
+  return bundles.map(({ embedding, ...rest }) => rest);
 }
 
 async function fetchSearchHTML(url: string): Promise<string> {
@@ -64,10 +92,17 @@ async function fetchSearchHTML(url: string): Promise<string> {
         }
       }
 
+      // A fresh session usually gets a different exit IP, so retrying a block page can succeed
+      if (isBlockPage(html)) {
+        resetBrowser(url);
+        throw new Error(`Blocked by site anti-bot page ("${html.match(/<title[^>]*>([^<]*)/i)?.[1]?.trim()}")`);
+      }
+
       return html;
     } catch (e: any) {
       lastErr = e;
-      if (/domain limit/i.test(e.message)) resetBrowser();
+      if (isNonRetryable(e.message)) break;
+      if (/domain limit/i.test(e.message)) resetBrowser(url);
       if (attempt < 3) {
         const delay = 3000 * Math.pow(2, attempt);
         console.warn(`[search] Attempt ${attempt + 1} failed (${e.message.split('\n')[0]}) — retrying in ${delay}ms`);
@@ -78,23 +113,26 @@ async function fetchSearchHTML(url: string): Promise<string> {
   throw lastErr;
 }
 
+class IncompletePageError extends Error {}
+
+// scrapeProductBD already retries network/browser errors internally. This loop only
+// re-fetches pages that loaded but rendered incompletely, so paid attempts don't multiply.
 async function scrapeProductWithRetry(url: string): Promise<ProductData> {
   let lastErr: Error = new Error('unknown');
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const data = await scrapeProductBD(url);
       if (data.productName == null && data.price == null) {
-        throw new Error('blank data — page may not have rendered correctly');
+        throw new IncompletePageError('blank data — page may not have rendered correctly');
       }
       const hasImage = !!data.imageUrl || (data.imageUrls?.length ?? 0) > 0;
       if (!hasImage) {
-        throw new Error('no image — will retry');
+        throw new IncompletePageError('no image — will retry');
       }
       return data;
     } catch (e: any) {
       lastErr = e;
-      const noRetry = /no_peer|probe_timeout|a2a_tun_open|a2a_exception|ERR_TUNNEL_CONNECTION_FAILED|Timeout \d+ms exceeded/i.test(e.message);
-      if (noRetry) break;
+      if (!(e instanceof IncompletePageError)) break;
       if (attempt < 2) {
         const delay = 3000 * Math.pow(2, attempt);
         console.warn(`[retry ${attempt + 1}] ${url}: ${e.message} (waiting ${delay}ms)`);
@@ -282,7 +320,7 @@ export async function scrapeBulk(options: {
   // Init vector tagger + mongo once
   await ensureTagger();
 
-  const jobId = buildJobId(sites, category, count);
+  const jobId = buildJobId(sites, category, count, categoryKey);
   const existing = loadCheckpoint(jobId);
   const resumed = existing !== null;
 
@@ -347,7 +385,7 @@ export async function scrapeBulk(options: {
     resumed,
   };
 
-  fs.writeFileSync(outputPath, JSON.stringify(result, null, 2));
+  fs.writeFileSync(outputPath, JSON.stringify({ ...result, bundles: withoutEmbeddings(result.bundles) }));
   console.log(`Saved to ${outputPath}`);
 
   deleteCheckpoint(jobId);
