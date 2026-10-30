@@ -15,6 +15,7 @@ import { scrapeBulk, withoutEmbeddings } from './src/services/playwright.service
 import { closeBrowser } from './src/services/playwright.service';
 import { BundledProduct } from './src/parsers/types';
 import { SiteKey } from './src/config/sites';
+import { isResumeStateFresh, resumeMaxAgeMs } from './src/services/checkpoint.service';
 
 // ─── Query plan ──────────────────────────────────────────────────────────────
 // 11 queries × 4 sites × 25 products = ~1100 raw products → target 1000+ bundles
@@ -207,7 +208,10 @@ interface MasterState {
 function loadState(): MasterState {
   if (fs.existsSync(MASTER_STATE_PATH)) {
     try {
-      return JSON.parse(fs.readFileSync(MASTER_STATE_PATH, 'utf8'));
+      const state: MasterState = JSON.parse(fs.readFileSync(MASTER_STATE_PATH, 'utf8'));
+      // Older state holds a previous day's prices — never resume it as current data
+      if (isResumeStateFresh(state.startedAt, resumeMaxAgeMs())) return state;
+      console.warn(`[master] Discarding resume state from ${state.startedAt} — older than ${resumeMaxAgeMs() / 3600000}h.`);
     } catch {}
   }
   return {
@@ -275,7 +279,22 @@ async function main() {
         broadCategory: query.broadCategory,
         subCategory: query.subCategory,
         count: query.count,
+        allowUnsupported: true,
       });
+
+      for (const o of result.siteResults) {
+        if (o.status !== 'complete') console.warn(`[master]   ${o.site}: ${o.status}${o.reason ? ` — ${o.reason}` : ''}`);
+      }
+      if (result.status === 'stopped') {
+        console.log('[master] ⛔ Stopped — progress kept in checkpoints/state; rerun to resume. No final output written.');
+        saveState(state);
+        return;
+      }
+      if (result.status === 'failed') {
+        console.error(`[master] "${query.label}" FAILED — no site produced data; it will be retried on the next run.`);
+        saveState(state);
+        continue;
+      }
 
       // Merge bundles (dedupe by name across queries)
       state.allBundles.push(...result.bundles);

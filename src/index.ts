@@ -13,6 +13,7 @@ import { runDemoPipeline } from './cron/demo-runner';
 import { attachLogServer, interceptConsole, getLogs } from './logger';
 import { LOCK_FILE, STOP_FILE, readLock } from './utils/stop-signal';
 import { requireScraperApiKey, isApiKeyEnforced } from './utils/api-key';
+import { UnsupportedSitesError } from './config/transport-policy';
 
 interceptConsole();
 
@@ -78,7 +79,7 @@ app.get('/scrape-category', async (req, res) => {
 const VALID_SITES: SiteKey[] = ['amazon', 'noon', 'carrefour', 'sharafdg', 'jumbo', 'mumzworld', 'namshi', 'letstango'];
 
 app.post('/scrape-bulk', async (req, res) => {
-  const { site, sites: sitesParam, category, categoryKey, broadCategory, subCategory, count } = req.body;
+  const { site, sites: sitesParam, category, categoryKey, broadCategory, subCategory, count, allowPartial } = req.body;
 
   // Accept `sites` (array) or `site` (single string, backward compat)
   let requestedSites: string[] = [];
@@ -116,9 +117,15 @@ app.post('/scrape-bulk', async (req, res) => {
       broadCategory: typeof broadCategory === 'string' ? broadCategory.trim() : undefined,
       subCategory: typeof subCategory === 'string' ? subCategory.trim() : undefined,
       count,
+      allowUnsupported: allowPartial === true,
     });
-    res.json({
-      success: true,
+    // complete → 200; partial → 207 (some sites failed/unsupported); stopped → 409 (resumable); failed → 502
+    const httpStatus = { complete: 200, partial: 207, stopped: 409, failed: 502 }[result.status];
+    res.status(httpStatus).json({
+      success: result.status === 'complete',
+      status: result.status,
+      siteResults: result.siteResults,
+      matchReviewCount: result.matchReviews.length,
       jobId: result.jobId,
       resumed: result.resumed,
       sites: result.sites,
@@ -133,6 +140,14 @@ app.post('/scrape-bulk', async (req, res) => {
       bundles: withoutEmbeddings(result.bundles),
     });
   } catch (error: any) {
+    if (error instanceof UnsupportedSitesError) {
+      return res.status(422).json({
+        success: false,
+        error: error.message,
+        unsupported: error.unsupported,
+        hint: 'Remove these sites, or pass "allowPartial": true to scrape the others and report these as unsupported.',
+      });
+    }
     res.status(500).json({ error: error.message });
   }
 });

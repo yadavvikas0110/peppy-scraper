@@ -74,29 +74,48 @@ export async function runDemoPipeline(): Promise<void> {
           broadCategory: q.broadCategory,
           subCategory: q.subCategory,
           count: q.count,
+          allowUnsupported: true,
         })
       )
     );
 
     const allBundles: BundledProduct[] = [];
     let totalRaw = 0;
+    const issues: string[] = [];
+    let stopped = false;
 
     for (let i = 0; i < DEMO_QUERIES.length; i++) {
       const q = DEMO_QUERIES[i];
       const outcome = outcomes[i];
-      if (outcome.status === 'fulfilled') {
+      if (outcome.status === 'fulfilled' && outcome.value.status === 'stopped') {
+        stopped = true;
+        console.log(`[demo] ⛔ "${q.label}" interrupted — not published.`);
+      } else if (outcome.status === 'fulfilled' && outcome.value.status === 'failed') {
+        totalErrors++;
+        issues.push(`${q.label}: no site produced data`);
+        console.error(`[demo] ✗ "${q.label}" FAILED — no site produced data`);
+      } else if (outcome.status === 'fulfilled') {
         const r = outcome.value;
+        for (const o of r.siteResults) if (o.status !== 'complete') issues.push(`${q.label} / ${o.site}: ${o.status}${o.reason ? ` — ${o.reason}` : ''}`);
         allBundles.push(...r.bundles);
         totalRaw += r.totalScraped;
         totalErrors += r.errors.length;
         console.log(`[demo] ✓ "${q.label}" — ${r.bundleCount} bundles (${r.totalScraped} raw)`);
       } else {
         totalErrors++;
+        issues.push(`${q.label}: ${outcome.reason?.message}`);
         console.error(`[demo] ✗ "${q.label}" FAILED: ${outcome.reason?.message}`);
       }
     }
 
     console.log(`\n[demo] Scraped: ${totalRaw} raw → ${allBundles.length} bundles | Errors: ${totalErrors}`);
+
+    if (stopped) {
+      clearStopSignal();
+      console.log('[demo] Stopped before completion — nothing pushed.');
+      await reportStatus(false, 0, totalErrors, Date.now() - start, 'Demo stopped before completion; nothing published');
+      return;
+    }
 
     if (allBundles.length === 0) {
       console.error('[demo] No bundles produced — skipping push.');
@@ -120,7 +139,10 @@ export async function runDemoPipeline(): Promise<void> {
     console.log(`[demo] ChromaDB: ${pushResult.chromaVectors} vectors`);
     console.log('[demo] ══════════════════════════════════════════════════\n');
 
-    await reportStatus(true, pushResult.mongoInserted + pushResult.mongoUpdated, totalErrors, elapsed * 1000);
+    issues.push(...pushResult.errors);
+    for (const issue of issues) console.warn(`[demo]   issue — ${issue}`);
+    await reportStatus(issues.length === 0, pushResult.mongoInserted + pushResult.mongoUpdated, totalErrors, elapsed * 1000,
+      issues.length ? `Partial demo: ${issues.join('; ').slice(0, 1000)}` : undefined);
   } catch (e: any) {
     console.error(`[demo] Fatal error: ${e.message}`);
     await reportStatus(false, 0, 0, Date.now() - start, e.message);

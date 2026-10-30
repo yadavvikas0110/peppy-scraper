@@ -11,10 +11,13 @@ dotenv.config();
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { Collection, MongoClient } from 'mongodb';
-import { BundledProduct } from '../parsers/types';
+import axios from 'axios';
+import { BundledProduct, RetailerOffer, StockStatus, toStockStatus } from '../parsers/types';
 import { embedBatch, isEmbeddingAvailable } from '../services/embedding.service';
 import { connectChroma, upsertProductsBatch, isChromaAvailable } from '../services/chroma.service';
 import { getMongoConfig, redactMongoUri } from '../shared/db/mongo';
+import { canonicalProductUrl, isAffiliateUrl, marketplaceIdFor, offerIdentityKey } from '../services/product-identity';
+import { SCRAPER_API_KEY_HEADER } from '../utils/api-key';
 
 // ── Category inference ────────────────────────────────────────────────────────
 const QUERY_TO_TAXONOMY: Array<{ pattern: RegExp; broadCategory: string; subCategory: string }> = [
@@ -86,21 +89,35 @@ function nameKey(name: string): string {
   return name.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-// The same product can come back from several queries in one run. Merge those bundles
-// before writing, otherwise concurrent upserts in one bulkWrite race on the same name.
+function bundleKeys(b: BundledProduct): string[] {
+  const keys = b.name ? [`name:${nameKey(b.name)}`] : [];
+  for (const r of b.retailers) {
+    const k = offerIdentityKey(r.retailerId, r.productUrl);
+    if (k) keys.push(k);
+  }
+  return keys;
+}
+
+// The same product can come back from several queries in one run — by the same name or the
+// same marketplace listing (ASIN/SKU). Merge those bundles before writing.
 export function mergeDuplicateBundles(bundles: BundledProduct[]): BundledProduct[] {
-  const byName = new Map<string, BundledProduct>();
+  const merged: BundledProduct[] = [];
+  const byKey = new Map<string, BundledProduct>();
   for (const b of bundles) {
     if (!b.name) continue;
-    const key = nameKey(b.name);
-    const prev = byName.get(key);
+    const keys = bundleKeys(b);
+    const prev = keys.map(k => byKey.get(k)).find(Boolean);
     if (!prev) {
-      byName.set(key, { ...b, retailers: [...b.retailers], tags: [...b.tags], images: [...b.images] });
+      const copy = { ...b, retailers: [...b.retailers], tags: [...b.tags], images: [...b.images] };
+      merged.push(copy);
+      keys.forEach(k => byKey.set(k, copy));
       continue;
     }
     for (const offer of b.retailers) {
       const i = prev.retailers.findIndex(r => r.retailerId === offer.retailerId);
-      if (i >= 0) prev.retailers[i] = offer; else prev.retailers.push(offer);
+      if (i < 0) prev.retailers.push(offer);
+      // Keep the newer observation of the same retailer
+      else if ((offer.observedAt ?? '') >= (prev.retailers[i].observedAt ?? '')) prev.retailers[i] = offer;
     }
     prev.tags = [...new Set([...prev.tags, ...b.tags])];
     if (b.images.length > prev.images.length) prev.images = [...b.images];
@@ -111,11 +128,14 @@ export function mergeDuplicateBundles(bundles: BundledProduct[]): BundledProduct
     }
     prev.embedding ??= b.embedding;
     prev.retailerCount = prev.retailers.length;
-    const prices = prev.retailers.map(r => r.price).filter((p): p is number => p !== null && p > 0);
+    const prices = prev.retailers
+      .filter(r => toStockStatus(r.inStock) !== 'unavailable')
+      .map(r => r.price).filter((p): p is number => p !== null && p > 0);
     prev.lowestPrice = prices.length ? Math.min(...prices) : null;
     prev.highestPrice = prices.length ? Math.max(...prices) : null;
+    bundleKeys(b).forEach(k => byKey.set(k, prev));
   }
-  return [...byName.values()];
+  return merged;
 }
 
 // ── Map BundledProduct → MongoDB schema ───────────────────────────────────────
@@ -123,11 +143,19 @@ export function mergeDuplicateBundles(bundles: BundledProduct[]): BundledProduct
 export interface MongoRetailerOffer {
   retailerId: string;
   retailerName: string;
-  price: number;
+  /** Absent only for an unavailable offer whose page showed no price (updates stock, keeps old price) */
+  price?: number;
   currency: string;
-  inStock: boolean;
+  /** null = unknown; never defaulted (the backend schema would otherwise read it as true) */
+  inStock: boolean | null;
+  stockStatus: StockStatus;
   productUrl?: string;
   imageUrl?: string;
+  externalId?: string;
+  canonicalUrl?: string;
+  /** When the offer was observed on the retailer's site — never the time of the push */
+  lastSeenAt?: Date;
+  isStale?: boolean;
 }
 
 export interface MongoProduct {
@@ -147,22 +175,37 @@ function dropUndefined<T extends object>(obj: T): T {
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as T;
 }
 
+function toDate(iso: string | null | undefined): Date | undefined {
+  if (!iso) return undefined;
+  const d = new Date(iso);
+  return Number.isFinite(d.getTime()) ? d : undefined;
+}
+
+export function toMongoOffer(r: RetailerOffer): MongoRetailerOffer | null {
+  const stockStatus = r.stockStatus ?? toStockStatus(r.inStock);
+  const hasPrice = r.price !== null && Number.isFinite(r.price) && r.price > 0;
+  // A priceless offer only carries information when the page says the item is unavailable
+  if (!hasPrice && stockStatus !== 'unavailable') return null;
+  return dropUndefined({
+    retailerId:   r.retailerId,
+    retailerName: r.retailerName,
+    price:        hasPrice ? r.price! : undefined,
+    currency:     r.currency || 'AED',
+    inStock:      stockStatus === 'unknown' ? null : stockStatus === 'available',
+    stockStatus,
+    productUrl:   r.productUrl ?? undefined,
+    imageUrl:     r.imageUrl ?? undefined,
+    externalId:   r.externalId ?? marketplaceIdFor(r.retailerId, r.productUrl) ?? undefined,
+    canonicalUrl: r.canonicalUrl ?? canonicalProductUrl(r.productUrl) ?? undefined,
+    lastSeenAt:   toDate(r.observedAt),
+  });
+}
+
 export function toMongoProduct(bundle: BundledProduct): MongoProduct | null {
   if (!bundle.name) return null;
   const { broadCategory, subCategory } = taxonomyOf(bundle);
 
-  const retailers = bundle.retailers
-    .filter(r => r.price !== null && r.price > 0)
-    .map(r => dropUndefined({
-      retailerId:   r.retailerId,
-      retailerName: r.retailerName,
-      price:        r.price!,
-      currency:     r.currency || 'AED',
-      inStock:      r.inStock ?? true,
-      productUrl:   r.productUrl ?? undefined,
-      imageUrl:     r.imageUrl ?? undefined,
-    }));
-
+  const retailers = bundle.retailers.map(toMongoOffer).filter((o): o is MongoRetailerOffer => o !== null);
   if (retailers.length === 0) return null;
   const images = bundle.images.filter(Boolean);
   if (images.length === 0) return null; // reject no-image products
@@ -181,80 +224,192 @@ export function toMongoProduct(bundle: BundledProduct): MongoProduct | null {
   });
 }
 
-// ── Upsert that merges into existing documents ────────────────────────────────
+/** Only products with at least one priced offer may create a new document. */
+export function isInsertable(p: MongoProduct): boolean {
+  return p.retailers.some(r => r.price !== undefined);
+}
 
-// Wrap literals so strings starting with "$" are never read as field paths
-const lit = (v: unknown) => ({ $literal: v });
+// ── Derived pricing ───────────────────────────────────────────────────────────
 
-// Matches an existing product by name, or by any retailer URL (names drift between runs
-// because the bundler keeps the longest retailer title)
-export function productFilter(p: MongoProduct): Record<string, unknown> {
-  const urls = p.retailers.map(r => r.productUrl).filter((u): u is string => !!u);
-  return urls.length > 0
-    ? { $or: [{ name: p.name }, { 'retailers.productUrl': { $in: urls } }] }
-    : { name: p.name };
+export function stockStatusOf(offer: any): StockStatus {
+  if (offer?.stockStatus === 'available' || offer?.stockStatus === 'unavailable' || offer?.stockStatus === 'unknown') return offer.stockStatus;
+  return toStockStatus(offer?.inStock ?? null);
+}
+
+export interface DerivedPricing {
+  /** Range over offers that may be bought: available or unknown stock, not stale. Null hides the product from listings. */
+  lowestPrice: number | null;
+  highestPrice: number | null;
+  /** Best price among offers with evidence of availability only */
+  bestConfirmedPrice: number | null;
+  isTrending: boolean;
+  isTopRated: boolean;
+}
+
+export function derivePricing(retailers: any[], rating?: number | null, reviewCount?: number | null): DerivedPricing {
+  const priced = (retailers ?? []).filter(r => typeof r?.price === 'number' && r.price > 0 && r.isStale !== true);
+  const comparable = priced.filter(r => stockStatusOf(r) !== 'unavailable');
+  const confirmed = comparable.filter(r => stockStatusOf(r) === 'available');
+  const prices = comparable.map(r => r.price as number);
+  const confirmedPrices = confirmed.map(r => r.price as number);
+  const comparableRetailers = new Set(comparable.map(r => r.retailerId)).size;
+  return {
+    lowestPrice: prices.length ? Math.min(...prices) : null,
+    highestPrice: prices.length ? Math.max(...prices) : null,
+    bestConfirmedPrice: confirmedPrices.length ? Math.min(...confirmedPrices) : null,
+    // Same rule as the backend's migrate:trending — a real comparison plus social proof
+    isTrending: comparableRetailers >= 2 && ((rating ?? 0) >= 4 || (reviewCount ?? 0) >= 50),
+    isTopRated: (rating ?? 0) >= 4.5 && (reviewCount ?? 0) >= 100,
+  };
+}
+
+// ── Merge into existing documents ─────────────────────────────────────────────
+
+function sameListing(existing: any, incoming: MongoRetailerOffer): boolean {
+  const existingKey = existing.externalId
+    ? `${existing.retailerId}:id:${existing.externalId}`
+    : offerIdentityKey(existing.retailerId, existing.productUrl);
+  const incomingKey = incoming.externalId
+    ? `${incoming.retailerId}:id:${incoming.externalId}`
+    : offerIdentityKey(incoming.retailerId, incoming.productUrl);
+  return !!existingKey && existingKey === incomingKey;
 }
 
 /**
- * Aggregation-pipeline update for one product. On an existing document it:
- *  - replaces only this run's retailers' offers (matched by retailerId), keeping every
- *    other retailer and any extra offer fields (variants, retailerLogo, originalPrice)
- *  - fills name/description/brand/category/images only when missing, so admin edits
- *    and S3-migrated images are never overwritten
- *  - leaves fields it does not own (productRole, variant grouping, ...) untouched
+ * Merges one observed offer onto the stored offer of the same retailer.
+ *  - an observation older than the stored one never overwrites it
+ *  - an unavailable offer without a price only updates stock (and needs an existing offer)
+ *  - extra stored fields (variants, retailerLogo, originalPrice) survive
+ *  - an affiliate URL stored for the same listing is kept as the redirect target
  */
-export function buildProductUpdate(p: MongoProduct, now: Date): object[] {
-  const existingRetailers = { $ifNull: ['$retailers', []] };
-  const incomingIds = p.retailers.map(r => r.retailerId);
+export function mergeOffer(existing: any | undefined, incoming: MongoRetailerOffer): any | null {
+  const existingSeen = existing?.lastSeenAt ? new Date(existing.lastSeenAt).getTime() : null;
+  const incomingSeen = incoming.lastSeenAt ? incoming.lastSeenAt.getTime() : null;
+  if (existing && existingSeen !== null && (incomingSeen === null || incomingSeen < existingSeen)) return existing;
 
-  const mergedRetailers = {
-    $concatArrays: [
-      { $filter: { input: existingRetailers, as: 'r', cond: { $not: [{ $in: ['$$r.retailerId', lit(incomingIds)] }] } } },
-      p.retailers.map(offer => ({
-        $mergeObjects: [
-          { $ifNull: [{ $arrayElemAt: [{ $filter: { input: existingRetailers, as: 'e', cond: { $eq: ['$$e.retailerId', lit(offer.retailerId)] } } }, 0] }, {}] },
-          lit({ ...offer, lastSeenAt: now }),
-        ],
-      })),
-    ],
-  };
+  if (incoming.price === undefined) {
+    if (!existing) return null;
+    return { ...existing, inStock: false, stockStatus: 'unavailable', isStale: false, lastSeenAt: incoming.lastSeenAt ?? existing.lastSeenAt };
+  }
 
-  const keepOrFill = (field: string, value: unknown) => ({ $ifNull: [`$${field}`, lit(value)] });
+  const keepAffiliateUrl = existing?.productUrl && isAffiliateUrl(existing.productUrl) && sameListing(existing, incoming);
+  return dropUndefined({
+    ...existing,
+    ...incoming,
+    productUrl: keepAffiliateUrl ? existing.productUrl : incoming.productUrl ?? existing?.productUrl,
+    isStale: false,
+    lastSeenAt: incoming.lastSeenAt ?? existing?.lastSeenAt,
+  });
+}
 
-  const fields: Record<string, unknown> = {
-    name:        keepOrFill('name', p.name),
-    category:    keepOrFill('category', p.category),
-    subcategory: keepOrFill('subcategory', p.subcategory),
-    images: {
-      $cond: [{ $gt: [{ $size: { $ifNull: ['$images', []] } }, 0] }, '$images', lit(p.images)],
-    },
-    tags:      { $setUnion: [{ $ifNull: ['$tags', []] }, lit(p.tags)] },
-    retailers: mergedRetailers,
-    createdAt: { $ifNull: ['$createdAt', lit(now)] },
-    updatedAt: lit(now),
-  };
-  if (p.description !== undefined) fields.description = keepOrFill('description', p.description);
-  if (p.brand !== undefined) fields.brand = keepOrFill('brand', p.brand);
-  // Ratings are fresh observations — overwrite when this run has them
-  if (p.rating !== undefined) fields.rating = lit(p.rating);
-  if (p.reviewCount !== undefined) fields.reviewCount = lit(p.reviewCount);
+/**
+ * Fields to $set on an existing document (or the full new document when `existing` is null).
+ * Fills name/description/brand/category/images only when missing so admin edits survive, and
+ * never writes backend-owned mapping fields — it only flags the product for re-mapping.
+ */
+export function mergeProduct(existing: any | null, p: MongoProduct, now: Date): Record<string, unknown> {
+  const stored: any[] = existing?.retailers ?? [];
+  const incomingIds = new Set(p.retailers.map(r => r.retailerId));
+  const merged = p.retailers
+    .map(offer => mergeOffer(stored.find(r => r.retailerId === offer.retailerId), offer))
+    .filter(Boolean);
+  const retailers = [...stored.filter(r => !incomingIds.has(r.retailerId)), ...merged];
 
-  const positivePrices = { $filter: { input: '$retailers.price', as: 'p', cond: { $gt: ['$$p', 0] } } };
+  const rating = p.rating ?? existing?.rating;
+  const reviewCount = p.reviewCount ?? existing?.reviewCount;
+  const fill = <T>(field: string, value: T) => existing?.[field] ?? value;
 
-  return [
-    { $set: fields },
-    {
-      $set: {
-        lowestPrice:  { $min: positivePrices },
-        highestPrice: { $max: positivePrices },
-        isTrending:   { $gte: [{ $size: '$retailers' }, 2] },
-        isTopRated:   { $and: [{ $gte: [{ $ifNull: ['$rating', 0] }, 4.5] }, { $gte: [{ $ifNull: ['$reviewCount', 0] }, 100] }] },
-      },
-    },
-  ];
+  return dropUndefined({
+    name:        fill('name', p.name),
+    description: fill('description', p.description),
+    brand:       fill('brand', p.brand),
+    category:    fill('category', p.category),
+    subcategory: fill('subcategory', p.subcategory),
+    images:      existing?.images?.length ? existing.images : p.images,
+    tags:        [...new Set([...(existing?.tags ?? []), ...p.tags])],
+    // Ratings are fresh observations — overwrite when this run has them
+    rating,
+    reviewCount,
+    retailers,
+    ...derivePricing(retailers, rating, reviewCount),
+    ingestMappingStatus: 'pending',
+    ingestPendingAt: now,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  });
+}
+
+// ── Matching incoming products to stored documents ────────────────────────────
+
+const ASIN_IN_URL = (asins: string[]) => new RegExp(`/(?:dp|gp/product)/(?:${asins.join('|')})(?:[/?#]|$)`, 'i');
+
+/** One query that finds every stored document an incoming batch could belong to. */
+export function buildCandidateQuery(products: MongoProduct[]): Record<string, unknown> {
+  const names = new Set<string>();
+  const ids = new Set<string>();
+  const canonical = new Set<string>();
+  const urls = new Set<string>();
+  const asins = new Set<string>();
+  for (const p of products) {
+    names.add(p.name);
+    for (const r of p.retailers) {
+      if (r.externalId) ids.add(r.externalId);
+      if (r.canonicalUrl) canonical.add(r.canonicalUrl);
+      if (r.productUrl) urls.add(r.productUrl);
+      if (r.retailerId === 'amazon' && r.externalId && /^[A-Z0-9]{10}$/.test(r.externalId)) asins.add(r.externalId);
+    }
+  }
+  const or: Record<string, unknown>[] = [{ name: { $in: [...names] } }];
+  if (ids.size) or.push({ 'retailers.externalId': { $in: [...ids] } });
+  if (canonical.size) or.push({ 'retailers.canonicalUrl': { $in: [...canonical] } });
+  if (urls.size) or.push({ 'retailers.productUrl': { $in: [...urls] } });
+  // Rows seeded before identity fields existed store tagged URLs (…/dp/ASIN?tag=…)
+  if (asins.size) or.push({ 'retailers.productUrl': { $regex: ASIN_IN_URL([...asins]).source, $options: 'i' } });
+  return { $or: or };
+}
+
+function storedOfferKeys(doc: any): Set<string> {
+  const keys = new Set<string>();
+  for (const r of doc.retailers ?? []) {
+    const id = r.externalId ?? marketplaceIdFor(r.retailerId, r.productUrl);
+    if (id) keys.add(`${r.retailerId}:id:${String(id).toUpperCase()}`);
+    const canonical = r.canonicalUrl ?? canonicalProductUrl(r.productUrl);
+    if (canonical) keys.add(`${r.retailerId}:url:${canonical}`);
+  }
+  return keys;
+}
+
+/**
+ * Stored document for an incoming product: a marketplace-identity match (ASIN/SKU, then canonical
+ * URL) wins over a name match, so affiliate-tagged or re-titled rows are updated instead of duplicated.
+ */
+export function findExistingDocument(p: MongoProduct, docs: any[]): any | null {
+  const incomingKeys = p.retailers.flatMap(r => [
+    r.externalId ? `${r.retailerId}:id:${r.externalId.toUpperCase()}` : null,
+    r.canonicalUrl ? `${r.retailerId}:url:${r.canonicalUrl}` : null,
+  ]).filter((k): k is string => !!k);
+  const byIdentity = docs.filter(d => {
+    const keys = storedOfferKeys(d);
+    return incomingKeys.some(k => keys.has(k));
+  });
+  if (byIdentity.length > 1) {
+    console.warn(`[push] "${p.name}" matches ${byIdentity.length} stored products by marketplace ID — using the oldest; review duplicates.`);
+    byIdentity.sort((a, b) => String(a._id).localeCompare(String(b._id)));
+  }
+  if (byIdentity.length) return byIdentity[0];
+  const key = nameKey(p.name);
+  return docs.find(d => typeof d.name === 'string' && nameKey(d.name) === key) ?? null;
 }
 
 // ── Mongo connection helper ───────────────────────────────────────────────────
+
+/** The subset of a MongoDB collection the pipeline uses (a fake implements it in tests). */
+export interface ProductsCollection {
+  find(filter: object): { toArray(): Promise<any[]> };
+  insertMany(docs: any[], options?: object): Promise<{ insertedCount: number }>;
+  updateOne(filter: object, update: object): Promise<{ matchedCount: number; modifiedCount: number }>;
+  createIndex?(spec: object, options?: object): Promise<unknown>;
+}
 
 async function withProductsCollection<T>(fn: (col: Collection) => Promise<T>): Promise<T> {
   const { uri, dbName } = getMongoConfig();
@@ -269,17 +424,96 @@ async function withProductsCollection<T>(fn: (col: Collection) => Promise<T>): P
   }
 }
 
+// ── Write ─────────────────────────────────────────────────────────────────────
+
+const MATCH_BATCH = 100;
+
+export interface WriteResult {
+  inserted: number;
+  updated: number;
+  /** incoming products that resolved to an existing document (by identity or name) */
+  matched: number;
+  conflicts: number;
+  skipped: number;
+}
+
+/**
+ * Upserts products with optimistic concurrency: an update only applies if the stored document's
+ * updatedAt is unchanged since it was read, so a concurrent admin edit is never overwritten.
+ * Conflicting products are re-read and retried once.
+ */
+export async function writeProducts(col: ProductsCollection, products: MongoProduct[], now: Date): Promise<WriteResult> {
+  const result: WriteResult = { inserted: 0, updated: 0, matched: 0, conflicts: 0, skipped: 0 };
+  let pending = products;
+
+  for (let attempt = 0; attempt < 2 && pending.length > 0; attempt++) {
+    const retry: MongoProduct[] = [];
+    for (let i = 0; i < pending.length; i += MATCH_BATCH) {
+      const batch = pending.slice(i, i + MATCH_BATCH);
+      const docs = await col.find(buildCandidateQuery(batch)).toArray();
+      // Several incoming products may land on the same stored document — merge them in order.
+      // `fields` holds only what the pipeline owns, so nothing else is ever $set.
+      const working = new Map<string, { base: any; fields: Record<string, unknown> }>();
+      const inserts: any[] = [];
+      const current = (d: any) => {
+        const w = working.get(String(d._id));
+        return w ? { ...w.base, ...w.fields } : d;
+      };
+
+      for (const p of batch) {
+        const target = findExistingDocument(p, [...docs.map(current), ...inserts]);
+        if (target && inserts.includes(target)) {
+          Object.assign(target, mergeProduct(target, p, now));
+        } else if (target) {
+          if (attempt === 0) result.matched++;
+          const id = String(target._id);
+          const base = working.get(id)?.base ?? docs.find(d => String(d._id) === id);
+          working.set(id, { base, fields: { ...working.get(id)?.fields, ...mergeProduct(target, p, now) } });
+        } else if (isInsertable(p)) {
+          inserts.push(mergeProduct(null, p, now));
+        } else {
+          result.skipped++;
+        }
+      }
+
+      if (inserts.length) {
+        const r = await col.insertMany(inserts, { ordered: false });
+        result.inserted += r.insertedCount;
+      }
+      for (const { base, fields } of working.values()) {
+        const r = await col.updateOne({ _id: base._id, updatedAt: base.updatedAt ?? null }, { $set: fields });
+        if (r.matchedCount === 0) {
+          result.conflicts++;
+          retry.push(...batch.filter(p => findExistingDocument(p, [base])));
+        } else if (r.modifiedCount > 0) {
+          result.updated++;
+        }
+      }
+    }
+    pending = retry;
+  }
+  if (pending.length) console.warn(`[push] ${pending.length} product(s) not written — stored documents kept changing (concurrent edits).`);
+  return result;
+}
+
 // ── Main callable function ────────────────────────────────────────────────────
 
 export interface PushResult {
   mongoInserted: number;
   mongoUpdated: number;
+  /** incoming products merged into existing documents */
+  matchedExisting: number;
+  /** bundles dropped before writing (no name/price/image) or with nothing insertable */
+  skipped: number;
   chromaVectors: number;
+  /** Outcome of asking the backend to map categories/roles/variants for the pushed products */
+  mapping: MappingRequestResult;
   errors: string[];
 }
 
 export async function pushToDatabase(
   rawBundles: BundledProduct[],
+  opts: { collection?: ProductsCollection; now?: Date; requestMapping?: () => Promise<MappingRequestResult> } = {},
 ): Promise<PushResult> {
   const errors: string[] = [];
 
@@ -287,36 +521,54 @@ export async function pushToDatabase(
   const products = bundles.map(toMongoProduct).filter((p): p is MongoProduct => p !== null);
   console.log(`[push] ${rawBundles.length} bundles → ${bundles.length} after dedupe → ${products.length} valid products`);
 
-  const { dbName } = getMongoConfig();
-  console.log(`[push] Target: ${dbName}.products_clean`);
+  const offers = products.flatMap(p => p.retailers);
+  const unknownStock = offers.filter(o => o.stockStatus === 'unknown').length;
+  const unobserved = offers.filter(o => !o.lastSeenAt).length;
+  if (unknownStock) console.log(`[push] ${unknownStock}/${offers.length} offers have unknown stock (kept, labelled unknown).`);
+  if (unobserved) console.warn(`[push] ${unobserved} offers carry no observation time — their lastSeenAt is left as stored.`);
 
-  const now = new Date();
-  const { mongoInserted, mongoUpdated } = await withProductsCollection(async col => {
-    // Supports the productUrl match below; the backend's Mongoose schema owns the other indexes
-    await col.createIndex({ 'retailers.productUrl': 1 }, { background: true })
-      .catch((e: any) => console.warn(`[push] Index retailers.productUrl not created: ${e.message}`));
-    await col.createIndex({ name: 1 }, { background: true })
-      .catch((e: any) => console.warn(`[push] Index name not created: ${e.message}`));
+  const now = opts.now ?? new Date();
+  const write = async (col: ProductsCollection) => {
+    // Support the identity lookups; the backend's Mongoose schema owns the other indexes
+    for (const field of ['retailers.productUrl', 'retailers.externalId', 'retailers.canonicalUrl', 'name', 'ingestMappingStatus']) {
+      await col.createIndex?.({ [field]: 1 }, { background: true })
+        .catch((e: any) => console.warn(`[push] Index ${field} not created: ${e.message}`));
+    }
+    return products.length ? writeProducts(col, products, now) : { inserted: 0, updated: 0, matched: 0, conflicts: 0, skipped: 0 };
+  };
 
-    if (products.length === 0) return { mongoInserted: 0, mongoUpdated: 0 };
+  let written: WriteResult;
+  if (opts.collection) {
+    written = await write(opts.collection);
+  } else {
+    console.log(`[push] Target: ${getMongoConfig().dbName}.products_clean`);
+    written = await withProductsCollection(col => write(col as unknown as ProductsCollection));
+  }
+  console.log(`[push] ${written.inserted} new, ${written.updated} updated, ${written.skipped} skipped (no priced offer), ${written.conflicts} write conflict(s)`);
+  if (written.conflicts) errors.push(`${written.conflicts} write conflict(s) with concurrent edits`);
 
-    const ops = products.map(p => ({
-      updateOne: { filter: productFilter(p), update: buildProductUpdate(p, now), upsert: true },
-    }));
-    const bulkResult = await col.bulkWrite(ops as any[], { ordered: false });
-    console.log(`[push] Upserted: ${bulkResult.upsertedCount} new, ${bulkResult.modifiedCount} updated`);
-    return { mongoInserted: bulkResult.upsertedCount, mongoUpdated: bulkResult.modifiedCount };
-  });
+  // Categories, roles and variant groups are owned by the backend — ask it to map pending products
+  const mapping = await (opts.requestMapping ?? requestIngestMapping)();
+  if (!mapping.ok) errors.push(`Backend mapping not applied: ${mapping.message} (products stay pending; run it again later)`);
+
+  const pushed = {
+    mongoInserted: written.inserted,
+    mongoUpdated: written.updated,
+    matchedExisting: written.matched,
+    skipped: written.skipped + (bundles.length - products.length),
+    mapping,
+  };
+  if (opts.collection) return { ...pushed, chromaVectors: 0, errors };
 
   let chromaVectors = 0;
 
   if (!isEmbeddingAvailable()) {
     console.warn('[push] OPENAI_API_KEY not set — skipping ChromaDB');
-    return { mongoInserted, mongoUpdated, chromaVectors, errors };
+    return { ...pushed, chromaVectors, errors };
   }
   if (!isChromaAvailable()) {
     console.warn('[push] ChromaDB not configured — skipping');
-    return { mongoInserted, mongoUpdated, chromaVectors, errors };
+    return { ...pushed, chromaVectors, errors };
   }
 
   try {
@@ -357,26 +609,83 @@ export async function pushToDatabase(
     errors.push(msg);
   }
 
-  return { mongoInserted, mongoUpdated, chromaVectors, errors };
+  return { ...pushed, chromaVectors, errors };
+}
+
+// ── Backend mapping ───────────────────────────────────────────────────────────
+
+export interface MappingRequestResult {
+  ok: boolean;
+  message: string;
+  mapped?: number;
+}
+
+/**
+ * Asks peppy-be to apply its category / product-role / variant-group mapping to every product
+ * flagged ingestMappingStatus: 'pending'. Idempotent: a failed call leaves products pending and
+ * the next call (or `npm run ingest:apply-mapping` in the backend) picks them up.
+ */
+export async function requestIngestMapping(env: NodeJS.ProcessEnv = process.env): Promise<MappingRequestResult> {
+  const beUrl = env.PEPPY_BE_URL;
+  const apiKey = env.SCRAPER_API_KEY;
+  if (!beUrl) return { ok: false, message: 'PEPPY_BE_URL is not set' };
+  if (!apiKey) return { ok: false, message: 'SCRAPER_API_KEY is not set (the mapping endpoint requires it)' };
+  try {
+    const res = await axios.post(`${beUrl}/api/v1/admin/scraper/ingest/apply-mapping`, {}, {
+      timeout: 300000,
+      headers: { [SCRAPER_API_KEY_HEADER]: apiKey },
+      validateStatus: () => true,
+    });
+    if (res.status !== 200 || !res.data?.success) {
+      return { ok: false, message: `HTTP ${res.status}: ${String(res.data?.error ?? '').slice(0, 200)}` };
+    }
+    const mapped = res.data.data?.mapped ?? 0;
+    console.log(`[push] Backend mapping applied to ${mapped} product(s).`);
+    return { ok: true, message: 'mapped', mapped };
+  } catch (e: any) {
+    return { ok: false, message: e.message };
+  }
 }
 
 // ── Stale offers ──────────────────────────────────────────────────────────────
 
 /**
- * Marks offers this pipeline wrote (they carry lastSeenAt) as out of stock when no run has
- * seen them for STALE_OFFER_DAYS (default 3). Offers from other importers have no
- * lastSeenAt and are never touched. A later run that sees the offer again restores it.
+ * Offers this pipeline wrote carry lastSeenAt. One not observed for `days` is stale: its price
+ * is old and its stock is no longer evidenced, so it becomes isStale + unknown stock (absence of
+ * data is not evidence of unavailability) and leaves the price range. Derived prices are
+ * recomputed in the same write. Offers from other importers have no lastSeenAt and are untouched.
  */
-export async function markStaleOffers(days = parseFloat(process.env.STALE_OFFER_DAYS || '3')): Promise<number> {
-  const cutoff = new Date(Date.now() - days * 24 * 3600 * 1000);
-  return withProductsCollection(async col => {
-    const result = await col.updateMany(
-      { retailers: { $elemMatch: { lastSeenAt: { $lt: cutoff }, inStock: { $ne: false } } } },
-      { $set: { 'retailers.$[r].inStock': false, updatedAt: new Date() } },
-      { arrayFilters: [{ 'r.lastSeenAt': { $lt: cutoff }, 'r.inStock': { $ne: false } }] },
-    );
-    return result.modifiedCount;
+export function markStaleInDocument(doc: any, cutoff: Date): Record<string, unknown> | null {
+  let changed = false;
+  const retailers = (doc.retailers ?? []).map((r: any) => {
+    if (!r.lastSeenAt || r.isStale === true || new Date(r.lastSeenAt) >= cutoff) return r;
+    changed = true;
+    return { ...r, isStale: true, stockStatus: 'unknown', inStock: null };
   });
+  if (!changed) return null;
+  return { retailers, ...derivePricing(retailers, doc.rating, doc.reviewCount) };
+}
+
+export async function markStaleOffers(
+  days = parseFloat(process.env.STALE_OFFER_DAYS || '3'),
+  opts: { collection?: ProductsCollection; now?: Date } = {},
+): Promise<number> {
+  const now = opts.now ?? new Date();
+  const cutoff = new Date(now.getTime() - days * 24 * 3600 * 1000);
+  const run = async (col: ProductsCollection) => {
+    const docs = await col.find({ retailers: { $elemMatch: { lastSeenAt: { $lt: cutoff }, isStale: { $ne: true } } } }).toArray();
+    let staleOffers = 0;
+    for (const doc of docs) {
+      const update = markStaleInDocument(doc, cutoff);
+      if (!update) continue;
+      const r = await col.updateOne({ _id: doc._id, updatedAt: doc.updatedAt ?? null }, { $set: { ...update, updatedAt: now } });
+      if (r.modifiedCount > 0) {
+        staleOffers += (update.retailers as any[]).filter((o, i) => o.isStale && !doc.retailers[i].isStale).length;
+      }
+    }
+    return staleOffers;
+  };
+  return opts.collection ? run(opts.collection) : withProductsCollection(col => run(col as unknown as ProductsCollection));
 }
 
 // ── Load bundles from JSON file ───────────────────────────────────────────────

@@ -12,6 +12,7 @@ import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
 import { MongoClient, Collection } from 'mongodb';
+import { getMongoConfig, redactMongoUri } from './src/shared/db/mongo';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -23,8 +24,7 @@ const AFFILIATE_LINKS: string[] = [
   'https://s.noon.com/BVN61juNRJE',
 ];
 
-const MONGO_URI = 'mongodb://prod:d8xX67Xj5qS6@23.21.118.73:27017/';
-const DB_NAME = 'prod';
+// Connection comes from MONGODB_URI / MONGODB_DB only — never hard-code credentials here.
 const COLLECTION = 'products_clean';
 
 chromium.use(StealthPlugin());
@@ -232,11 +232,17 @@ async function upsertProduct(col: Collection, p: ScrapedProduct): Promise<'inser
 
 async function main() {
   // MongoDB
-  const client = new MongoClient(MONGO_URI);
-  await client.connect();
-  const db = client.db(DB_NAME);
+  // Throws before any network I/O if MONGODB_URI is missing or malformed.
+  const { uri, dbName } = getMongoConfig();
+  const client = new MongoClient(uri);
+  try {
+    await client.connect();
+  } catch (err) {
+    throw new Error(`MongoDB connection failed: ${redactMongoUri(String((err as Error)?.message), uri)}`);
+  }
+  const db = client.db(dbName);
   const col = db.collection(COLLECTION);
-  console.log(`[mongo] Connected → ${DB_NAME}/${COLLECTION}`);
+  console.log(`[mongo] Connected → ${dbName}/${COLLECTION}`);
 
   // Browser
   const browser = await chromium.launch({

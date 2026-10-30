@@ -26,6 +26,26 @@ function getBrowserEndpoint(): string {
 
 const UNLOCKER_ZONE = () => process.env.BRIGHT_DATA_UNLOCKER_ZONE || 'web_unlocker1';
 
+/**
+ * Exit country for Unlocker requests. amazon.ae must be fetched from the UAE: from elsewhere it
+ * shows a foreign delivery location, which changes availability text and can hide the buy box.
+ */
+export function unlockerCountryFor(targetUrl: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const host = new URL(targetUrl).hostname;
+  if (/(^|\.)amazon\.ae$/i.test(host)) return (env.AMAZON_UNLOCKER_COUNTRY || 'ae').toLowerCase();
+  return undefined;
+}
+
+// ─── Request gate (budget / rate limit) ───────────────────────────────────────
+
+/** Called before every paid provider request; may wait (rate limit) or throw (budget exhausted). */
+export type ProviderRequestGate = (kind: 'unlocker' | 'browser', url: string) => Promise<void>;
+let requestGate: ProviderRequestGate | null = null;
+
+export function setProviderRequestGate(gate: ProviderRequestGate | null): void {
+  requestGate = gate;
+}
+
 const CONNECT_TIMEOUT_MS = 30000;
 
 // ─── Singleton browser pool ───────────────────────────────────────────────────
@@ -52,6 +72,13 @@ const blockedHosts = new Map<string, string>();
 
 export function isAccessDeniedError(message: string): boolean {
   return ACCESS_DENIED_RE.test(message);
+}
+
+// Our own credentials were rejected — no retry, host or session change can fix that
+const PROVIDER_AUTH_RE = /Unlocker API (401|403)\b|Invalid token|Invalid credentials|BRIGHT_DATA_[A-Z_]+ is not set/i;
+
+export function isProviderAuthError(message: string): boolean {
+  return PROVIDER_AUTH_RE.test(message);
 }
 
 function assertHostAllowed(url: string): void {
@@ -137,9 +164,11 @@ export function resetBrowser(url?: string): void {
 export async function fetchHTMLViaUnlocker(targetUrl: string): Promise<string> {
   assertHostAllowed(targetUrl);
   return unlockSemaphore().wrap(async () => {
+    await requestGate?.('unlocker', targetUrl);
+    const country = unlockerCountryFor(targetUrl);
     const response = await axios.post(
       'https://api.brightdata.com/request',
-      { zone: UNLOCKER_ZONE(), url: targetUrl, format: 'raw' },
+      { zone: UNLOCKER_ZONE(), url: targetUrl, format: 'raw', ...(country ? { country } : {}) },
       {
         headers: {
           Authorization: `Bearer ${getApiKey()}`,
@@ -170,6 +199,7 @@ export async function fetchHTMLViaBrowser(
 ): Promise<string> {
   assertHostAllowed(targetUrl);
   return pageSemaphore().wrap(async () => {
+    await requestGate?.('browser', targetUrl);
     const browser = await getBrowserFor(new URL(targetUrl).hostname);
     // Isolated context per request: prevents cookies/cache leaking between concurrent scrapes
     const context = await browser.newContext();
@@ -200,6 +230,7 @@ export async function fetchHTMLWithEval<T>(
 ): Promise<{ html: string; evaluated: T }> {
   assertHostAllowed(targetUrl);
   return pageSemaphore().wrap(async () => {
+    await requestGate?.('browser', targetUrl);
     const browser = await getBrowserFor(new URL(targetUrl).hostname);
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -240,7 +271,7 @@ async function withRetry<T>(
       lastErr = e;
       // Routing/tunnel failures, navigation timeouts and access refusals — retrying won't help
       const isRoutingErr = /no_peer|probe_timeout|a2a_tun_open|a2a_exception|ERR_TUNNEL_CONNECTION_FAILED|Timeout \d+ms exceeded|Host blocked by Bright Data/i.test(e.message)
-        || isAccessDeniedError(e.message);
+        || isAccessDeniedError(e.message) || isProviderAuthError(e.message);
       if (isRoutingErr) {
         throw e;
       }

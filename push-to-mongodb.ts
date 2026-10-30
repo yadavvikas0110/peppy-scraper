@@ -14,6 +14,7 @@ dotenv.config();
 import * as fs from 'fs';
 import * as path from 'path';
 import { pushToDatabase, loadBundlesFromJson } from './src/cron/push-pipeline';
+import { assertSafeWriteTarget } from './src/shared/db/mongo';
 
 function findMasterJson(arg?: string): string {
   if (arg && fs.existsSync(arg)) return arg;
@@ -30,6 +31,8 @@ async function main() {
   const jsonPath = findMasterJson(process.argv[2]);
   console.log(`\n[push] Reading ${path.basename(jsonPath)}...`);
 
+  // Refuses a production database unless CONFIRM_PRODUCTION_DB=yes
+  console.log(`[push] Target database: ${assertSafeWriteTarget().dbName}`);
   const bundles = loadBundlesFromJson(jsonPath);
   console.log(`[push] ${bundles.length} bundles found`);
 

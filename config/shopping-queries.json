@@ -1,0 +1,11 @@
+{
+  "_comment": "Shopping worker discovery queries (Amazon UAE). key is permanent — it names job records and checkpoints. count = products discovered per run. Set enabled:false to pause a query. broadCategory/subCategory must exist in src/config/taxonomy.ts.",
+  "queries": [
+    { "key": "iphone-16",           "label": "Apple iPhone 16",          "category": "apple iphone 16",          "broadCategory": "Electronics",      "subCategory": "Smartphones",            "count": 20 },
+    { "key": "samsung-galaxy-s25",  "label": "Samsung Galaxy S25",       "category": "samsung galaxy s25",       "broadCategory": "Electronics",      "subCategory": "Smartphones",            "count": 20 },
+    { "key": "macbook-air",         "label": "Apple MacBook Air",        "category": "apple macbook air",        "broadCategory": "Electronics",      "subCategory": "Laptops",                "count": 15, "enabled": false },
+    { "key": "airpods",             "label": "Apple AirPods",            "category": "apple airpods",            "broadCategory": "Electronics",      "subCategory": "Audio & Headphones",     "count": 15, "enabled": false },
+    { "key": "samsung-tv-55",       "label": "Samsung 55 inch TV",       "category": "samsung 55 inch tv",       "broadCategory": "Electronics",      "subCategory": "Televisions",            "count": 15, "enabled": false },
+    { "key": "air-fryer",           "label": "Air Fryer",                "category": "air fryer",                "broadCategory": "Home & Kitchen",   "subCategory": "Kitchen Appliances",     "count": 15, "enabled": false }
+  ]
+}
