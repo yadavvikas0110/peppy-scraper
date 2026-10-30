@@ -26,59 +26,149 @@ function getBrowserEndpoint(): string {
 
 const UNLOCKER_ZONE = () => process.env.BRIGHT_DATA_UNLOCKER_ZONE || 'web_unlocker1';
 
-// Concurrency caps — tunable via env vars
-const BROWSER_MAX_PAGES = parseInt(process.env.BD_BROWSER_CONCURRENCY || '8', 10);
-const UNLOCKER_MAX_CONCURRENT = parseInt(process.env.BD_UNLOCKER_CONCURRENCY || '20', 10);
+/**
+ * Exit country for Unlocker requests. amazon.ae must be fetched from the UAE: from elsewhere it
+ * shows a foreign delivery location, which changes availability text and can hide the buy box.
+ */
+export function unlockerCountryFor(targetUrl: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const host = new URL(targetUrl).hostname;
+  if (/(^|\.)amazon\.ae$/i.test(host)) return (env.AMAZON_UNLOCKER_COUNTRY || 'ae').toLowerCase();
+  return undefined;
+}
+
+// ─── Request gate (budget / rate limit) ───────────────────────────────────────
+
+/** Called before every paid provider request; may wait (rate limit) or throw (budget exhausted). */
+export type ProviderRequestGate = (kind: 'unlocker' | 'browser', url: string) => Promise<void>;
+let requestGate: ProviderRequestGate | null = null;
+
+export function setProviderRequestGate(gate: ProviderRequestGate | null): void {
+  requestGate = gate;
+}
+
+const CONNECT_TIMEOUT_MS = 30000;
 
 // ─── Singleton browser pool ───────────────────────────────────────────────────
 
-const pageSemaphore = new Semaphore(BROWSER_MAX_PAGES);
-const unlockSemaphore = new Semaphore(UNLOCKER_MAX_CONCURRENT);
+// Concurrency caps — tunable via env vars. Created on first use so values from
+// .env apply even when dotenv loads after this module is imported.
+let _pageSemaphore: Semaphore | null = null;
+let _unlockSemaphore: Semaphore | null = null;
 
-let _browser: Browser | null = null;
-let _connecting = false;
-let _connectQueue: Array<(b: Browser) => void> = [];
+function pageSemaphore(): Semaphore {
+  return _pageSemaphore ??= new Semaphore(parseInt(process.env.BD_BROWSER_CONCURRENCY || '8', 10));
+}
 
-async function getSharedBrowser(): Promise<Browser> {
-  if (_browser?.isConnected()) return _browser;
+function unlockSemaphore(): Semaphore {
+  return _unlockSemaphore ??= new Semaphore(parseInt(process.env.BD_UNLOCKER_CONCURRENCY || '20', 10));
+}
 
-  if (_connecting) {
-    return new Promise(resolve => _connectQueue.push(resolve));
+// ─── Blocked hosts ────────────────────────────────────────────────────────────
+
+// Bright Data refuses some domains (robots.txt / KYC). Retrying never helps, so once a
+// host is refused every later request to it fails fast for the rest of the process.
+const ACCESS_DENIED_RE = /restricted in accordance with robots\.txt|start a KYC application|access_denied|requires KYC/i;
+const blockedHosts = new Map<string, string>();
+
+export function isAccessDeniedError(message: string): boolean {
+  return ACCESS_DENIED_RE.test(message);
+}
+
+// Our own credentials were rejected — no retry, host or session change can fix that
+const PROVIDER_AUTH_RE = /Unlocker API (401|403)\b|Invalid token|Invalid credentials|BRIGHT_DATA_[A-Z_]+ is not set/i;
+
+export function isProviderAuthError(message: string): boolean {
+  return PROVIDER_AUTH_RE.test(message);
+}
+
+function assertHostAllowed(url: string): void {
+  const host = new URL(url).hostname;
+  const reason = blockedHosts.get(host);
+  if (reason) throw new Error(`Host blocked by Bright Data (${host}): ${reason}`);
+}
+
+function recordAccessDenied(url: string, err: any): void {
+  if (!isAccessDeniedError(err?.message ?? '')) return;
+  const host = new URL(url).hostname;
+  if (!blockedHosts.has(host)) {
+    blockedHosts.set(host, 'robots.txt/KYC restriction');
+    console.warn(`[BD] ${host} is restricted by Bright Data (robots.txt/KYC) — skipping it for the rest of this run`);
   }
+}
 
-  _connecting = true;
-  try {
-    console.log('[BD Browser] Connecting to Scraping Browser...');
-    _browser = await chromium.connectOverCDP(getBrowserEndpoint());
-    _browser.on('disconnected', () => {
-      console.warn('[BD Browser] Session disconnected — will reconnect on next request');
-      _browser = null;
+// One Scraping Browser session per hostname: a session that visits several sites fails
+// with navigate_domains_limit, and sites are scraped in parallel.
+const _browsers = new Map<string, Browser>();
+const _connecting = new Map<string, Promise<Browser>>();
+
+// Pages still in flight on a forgotten session get this long before it is closed
+const RETIRED_SESSION_GRACE_MS = 90000;
+
+async function getBrowserFor(host: string): Promise<Browser> {
+  const existing = _browsers.get(host);
+  if (existing?.isConnected()) return existing;
+  // Concurrent callers share one connect attempt; a failure rejects all of them.
+  const pending = _connecting.get(host);
+  if (pending) return pending;
+
+  const attempt = (async () => {
+    console.log(`[BD Browser] Connecting to Scraping Browser for ${host}...`);
+    let browser: Browser;
+    try {
+      browser = await chromium.connectOverCDP(getBrowserEndpoint(), { timeout: CONNECT_TIMEOUT_MS });
+    } catch (e: any) {
+      // Playwright error text includes the endpoint URL, which carries the zone password
+      const auth = process.env.BRIGHT_DATA_BROWSER_AUTH;
+      const message = String(e?.message ?? e);
+      throw new Error(`[BD Browser] Connect failed: ${auth ? message.split(auth).join('***') : message}`);
+    }
+    browser.on('disconnected', () => {
+      console.warn(`[BD Browser] Session for ${host} disconnected — will reconnect on next request`);
+      if (_browsers.get(host) === browser) _browsers.delete(host);
     });
-    console.log('[BD Browser] Connected.');
-    _connectQueue.forEach(resolve => resolve(_browser!));
-    _connectQueue = [];
-    return _browser;
+    console.log(`[BD Browser] Connected (${host}).`);
+    _browsers.set(host, browser);
+    return browser;
+  })();
+
+  _connecting.set(host, attempt);
+  try {
+    return await attempt;
   } finally {
-    _connecting = false;
+    _connecting.delete(host);
   }
+}
+
+// Stop handing out a session; close it once in-flight pages on it have had time to finish
+function retireBrowser(host: string): void {
+  const browser = _browsers.get(host);
+  if (!browser) return;
+  _browsers.delete(host);
+  setTimeout(() => { browser.close().catch(() => {}); }, RETIRED_SESSION_GRACE_MS).unref();
 }
 
 export async function closeBrowserPool(): Promise<void> {
-  await _browser?.close().catch(() => {});
-  _browser = null;
+  const all = [..._browsers.values()];
+  _browsers.clear();
+  await Promise.all(all.map(b => b.close().catch(() => {})));
 }
 
-export function resetBrowser(): void {
-  _browser = null;
+/** Forget the session for `url`'s host (or every session) so the next request reconnects. */
+export function resetBrowser(url?: string): void {
+  const hosts = url ? [new URL(url).hostname] : [..._browsers.keys()];
+  hosts.forEach(retireBrowser);
 }
 
 // ─── Unlocker API ─────────────────────────────────────────────────────────────
 
 export async function fetchHTMLViaUnlocker(targetUrl: string): Promise<string> {
-  return unlockSemaphore.wrap(async () => {
+  assertHostAllowed(targetUrl);
+  return unlockSemaphore().wrap(async () => {
+    await requestGate?.('unlocker', targetUrl);
+    const country = unlockerCountryFor(targetUrl);
     const response = await axios.post(
       'https://api.brightdata.com/request',
-      { zone: UNLOCKER_ZONE(), url: targetUrl, format: 'raw' },
+      { zone: UNLOCKER_ZONE(), url: targetUrl, format: 'raw', ...(country ? { country } : {}) },
       {
         headers: {
           Authorization: `Bearer ${getApiKey()}`,
@@ -91,7 +181,9 @@ export async function fetchHTMLViaUnlocker(targetUrl: string): Promise<string> {
     );
 
     if (response.status !== 200) {
-      throw new Error(`Unlocker API ${response.status}: ${String(response.data).slice(0, 200)}`);
+      const err = new Error(`Unlocker API ${response.status}: ${String(response.data).slice(0, 200)}`);
+      recordAccessDenied(targetUrl, err);
+      throw err;
     }
 
     return typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
@@ -105,13 +197,16 @@ export async function fetchHTMLViaBrowser(
   waitSelector?: string,
   waitMs = 10000
 ): Promise<string> {
-  return pageSemaphore.wrap(async () => {
-    const browser = await getSharedBrowser();
+  assertHostAllowed(targetUrl);
+  return pageSemaphore().wrap(async () => {
+    await requestGate?.('browser', targetUrl);
+    const browser = await getBrowserFor(new URL(targetUrl).hostname);
     // Isolated context per request: prevents cookies/cache leaking between concurrent scrapes
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
-      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 })
+        .catch((e: any) => { recordAccessDenied(targetUrl, e); throw e; });
 
       if (waitSelector) {
         await page.waitForSelector(waitSelector, { timeout: waitMs }).catch(() => {});
@@ -133,12 +228,15 @@ export async function fetchHTMLWithEval<T>(
   waitSelector?: string,
   waitMs = 10000
 ): Promise<{ html: string; evaluated: T }> {
-  return pageSemaphore.wrap(async () => {
-    const browser = await getSharedBrowser();
+  assertHostAllowed(targetUrl);
+  return pageSemaphore().wrap(async () => {
+    await requestGate?.('browser', targetUrl);
+    const browser = await getBrowserFor(new URL(targetUrl).hostname);
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
-      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 })
+        .catch((e: any) => { recordAccessDenied(targetUrl, e); throw e; });
 
       if (waitSelector) {
         await page.waitForSelector(waitSelector, { timeout: waitMs }).catch(() => {});
@@ -160,6 +258,7 @@ export async function fetchHTMLWithEval<T>(
 // ─── Retry wrapper ────────────────────────────────────────────────────────────
 
 async function withRetry<T>(
+  url: string,
   fn: () => Promise<T>,
   maxAttempts = 3,
   baseDelayMs = 2000
@@ -170,14 +269,15 @@ async function withRetry<T>(
       return await fn();
     } catch (e: any) {
       lastErr = e;
-      // Routing/tunnel failures and navigation timeouts — retrying won't help
-      const isRoutingErr = /no_peer|probe_timeout|a2a_tun_open|a2a_exception|ERR_TUNNEL_CONNECTION_FAILED|Timeout \d+ms exceeded/i.test(e.message);
+      // Routing/tunnel failures, navigation timeouts and access refusals — retrying won't help
+      const isRoutingErr = /no_peer|probe_timeout|a2a_tun_open|a2a_exception|ERR_TUNNEL_CONNECTION_FAILED|Timeout \d+ms exceeded|Host blocked by Bright Data/i.test(e.message)
+        || isAccessDeniedError(e.message) || isProviderAuthError(e.message);
       if (isRoutingErr) {
         throw e;
       }
       const isConnErr = /ENOTFOUND|ECONNRESET|ECONNREFUSED|WebSocket|disconnected|domain limit/i.test(e.message);
       if (isConnErr) {
-        _browser = null;
+        resetBrowser(url);
       }
       if (attempt < maxAttempts - 1) {
         const delay = baseDelayMs * Math.pow(2, attempt);
@@ -207,7 +307,7 @@ export async function scrapeProductBD(url: string): Promise<ProductData> {
 
   // Amazon: server-rendered, Unlocker works great
   if (hostname.includes('amazon.ae')) {
-    return withRetry(async () => {
+    return withRetry(url, async () => {
       const html = await fetchHTMLViaUnlocker(url);
       return parseAmazon(html, url);
     });
@@ -216,7 +316,7 @@ export async function scrapeProductBD(url: string): Promise<ProductData> {
   // JS-heavy sites: need Scraping Browser
   const waitSel = Object.entries(PRODUCT_WAIT).find(([h]) => hostname.includes(h))?.[1];
 
-  return withRetry(async () => {
+  return withRetry(url, async () => {
     if (hostname.includes('carrefouruae.com')) {
       // Carrefour: some products don't embed price in RSC payload.
       // Use page.evaluate() to read price from the rendered DOM.

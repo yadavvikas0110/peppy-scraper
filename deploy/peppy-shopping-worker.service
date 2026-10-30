@@ -1,0 +1,28 @@
+# systemd unit for the Amazon UAE shopping worker. Template — review paths/user before use.
+#   sudo cp deploy/peppy-shopping-worker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now peppy-shopping-worker   # start now and after every reboot
+#   journalctl -u peppy-shopping-worker -f              # live logs
+#   sudo systemctl stop peppy-shopping-worker           # graceful stop (SIGTERM → checkpoint → exit)
+[Unit]
+Description=Peppy shopping worker (Amazon UAE discovery + refresh)
+After=network-online.target
+Wants=network-online.target
+# Stop restarting if it crash-loops (10 starts in 10 minutes)
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=peppy
+WorkingDirectory=/opt/peppy-scraper
+# Dev server: .env.dev. Production additionally needs SHOPPING_WORKER_ENV=production and CONFIRM_PRODUCTION_DB=yes.
+ExecStart=/usr/bin/node --env-file=/opt/peppy-scraper/.env.dev dist/src/worker/worker.cli.js start
+Restart=on-failure
+RestartSec=30
+# Give the worker time to finish the current product and save its checkpoint
+KillSignal=SIGTERM
+TimeoutStopSec=150
+
+[Install]
+WantedBy=multi-user.target

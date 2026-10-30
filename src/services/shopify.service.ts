@@ -33,20 +33,33 @@ function htmlToText(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function matchesCategory(product: ShopifyProduct, category: string): boolean {
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Every category word must appear as a whole word (plural allowed): "baby stroller" must not
+// match "BaBylissPRO" or an adidas "Baby" jersey that has no stroller.
+export function matchesCategory(product: ShopifyProduct, category: string): boolean {
   if (!category) return true;
   const tokens = category.toLowerCase().split(/\s+/).filter(t => t.length > 2);
   const searchable = [
     product.title,
     product.product_type,
     product.vendor,
-    ...product.tags,
+    ...(product.tags ?? []),
   ].join(' ').toLowerCase();
-  return tokens.some(t => searchable.includes(t));
+  return tokens.every(t => new RegExp(`\\b${escapeRegExp(t)}(?:s|es)?\\b`).test(searchable));
+}
+
+// Cheapest in-stock variant, falling back to the cheapest of all variants
+function pickVariant(variants: ShopifyVariant[] | undefined): ShopifyVariant | undefined {
+  const priced = (variants ?? []).filter(v => !isNaN(parseFloat(v.price)));
+  const pool = priced.some(v => v.available) ? priced.filter(v => v.available) : priced;
+  return pool.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))[0];
 }
 
 export function mapShopifyProduct(product: ShopifyProduct, hostname: string): ProductData {
-  const variant = product.variants?.[0];
+  const variant = pickVariant(product.variants);
   const price = variant ? parseFloat(variant.price) : null;
   const imageUrls = (product.images ?? []).map(i => i.src).filter(Boolean);
   const imageUrl = imageUrls[0] ?? null;

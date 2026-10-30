@@ -16,11 +16,17 @@ const ANCHOR_CACHE_PATH = path.join(process.cwd(), 'output', 'anchor-cache.json'
 
 let anchorVectors: AnchorVector[] = [];
 let initialized = false;
+let initializing: Promise<void> | null = null;
 
 // ── Init: embed all tag anchors once, cache to disk ─────────────────────────
 
-export async function initVectorTagger(): Promise<void> {
-  if (initialized) return;
+// Concurrent callers share one init; a failed init can be retried by the next call
+export function initVectorTagger(): Promise<void> {
+  if (initialized) return Promise.resolve();
+  return initializing ??= loadAnchors().finally(() => { initializing = null; });
+}
+
+async function loadAnchors(): Promise<void> {
   if (!isEmbeddingAvailable()) {
     console.warn('[vector-tagger] OPENAI_API_KEY not set — vector tagging disabled, using base tags only');
     initialized = true;
@@ -115,8 +121,12 @@ export async function tagBundleWithVectors(
     const searchText = [bundle.name, bundle.description, bundle.category]
       .filter(Boolean)
       .join(' ');
-    const vectorTags = await tagText(searchText);
-    vectorTags.forEach(t => tagSet.add(t));
+    try {
+      const vectorTags = await tagText(searchText);
+      vectorTags.forEach(t => tagSet.add(t));
+    } catch (e: any) {
+      console.warn(`[vector-tagger] Tagging failed for "${bundle.name}" — base tags only: ${e.message}`);
+    }
   }
 
   // 3. Price tier

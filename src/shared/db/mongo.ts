@@ -40,6 +40,20 @@ export function getMongoConfig(env: NodeJS.ProcessEnv = process.env): MongoConfi
   return { uri, dbName };
 }
 
+const PRODUCTION_DB_NAME = /^(prod|production|live)([_-].*)?$/i;
+
+/**
+ * For CLIs that write products (add-to-mongodb, identity backfill, the shopping worker in
+ * development mode): refuses a production-named database unless CONFIRM_PRODUCTION_DB=yes.
+ */
+export function assertSafeWriteTarget(env: NodeJS.ProcessEnv = process.env): MongoConfig {
+  const config = getMongoConfig(env);
+  if (PRODUCTION_DB_NAME.test(config.dbName) && env.CONFIRM_PRODUCTION_DB !== 'yes') {
+    throw new Error(`Refusing to write to production database "${config.dbName}". Set CONFIRM_PRODUCTION_DB=yes only if that is intended.`);
+  }
+  return config;
+}
+
 export interface MongoConnection {
   getClient(): Promise<MongoClient>;
   getDb(name?: string): Promise<Db>;

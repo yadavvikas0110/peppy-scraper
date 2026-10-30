@@ -68,6 +68,18 @@ export function parseMumzworld(html: string, url: string): ProductData {
   if (inStock === null) {
     inStock = $('.stock.available').length > 0 ? true : ($('.stock.unavailable').length > 0 ? false : null);
   }
+  // Current pages carry stock only in the JSON-LD Product offer
+  if (inStock === null) {
+    $('script[type="application/ld+json"]').each((_, el) => {
+      if (inStock !== null) return;
+      try {
+        const nodes = [].concat(JSON.parse($(el).html() || '{}'));
+        const product: any = nodes.find((n: any) => n?.['@type'] === 'Product');
+        const offer = [].concat(product?.offers ?? [])[0] as any;
+        if (typeof offer?.availability === 'string') inStock = /InStock/i.test(offer.availability);
+      } catch {}
+    });
+  }
 
   // ── Description ───────────────────────────────────────────────────────────
   let description: string | null = null;

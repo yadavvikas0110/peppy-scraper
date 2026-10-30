@@ -123,14 +123,15 @@ export const SITES: Record<SiteKey, SiteConfig> = {
       `https://www.namshi.com/uae-en/search/?q=${encodeURIComponent(category)}&page=${page}`,
     parseSearchLinks: parseNamshiSearch,
     categories: {
-      'women-fashion':   (p) => `https://www.namshi.com/uae-en/women/?page=${p}`,
-      'men-fashion':     (p) => `https://www.namshi.com/uae-en/men/?page=${p}`,
-      'kids-fashion':    (p) => `https://www.namshi.com/uae-en/kids/?page=${p}`,
-      'women-shoes':     (p) => `https://www.namshi.com/uae-en/women/shoes/?page=${p}`,
-      'men-shoes':       (p) => `https://www.namshi.com/uae-en/men/shoes/?page=${p}`,
-      'bags':            (p) => `https://www.namshi.com/uae-en/women/bags/?page=${p}`,
-      'abayas':          (p) => `https://www.namshi.com/uae-en/women/abayas/?page=${p}`,
-      'sports-fashion':  (p) => `https://www.namshi.com/uae-en/women/activewear/?page=${p}`,
+      // Product listing pages. /uae-en/women/ etc. are landing pages with banners only (no products).
+      'women-fashion':   (p) => `https://www.namshi.com/uae-en/women-clothing/?page=${p}`,
+      'men-fashion':     (p) => `https://www.namshi.com/uae-en/men-clothing/?page=${p}`,
+      'kids-fashion':    (p) => `https://www.namshi.com/uae-en/kids-clothing/?page=${p}`,
+      'women-shoes':     (p) => `https://www.namshi.com/uae-en/women-shoes/?page=${p}`,
+      'men-shoes':       (p) => `https://www.namshi.com/uae-en/men-shoes/?page=${p}`,
+      'bags':            (p) => `https://www.namshi.com/uae-en/women-bags/?page=${p}`,
+      'abayas':          (p) => `https://www.namshi.com/uae-en/women-clothing-arabian_clothing-abayas/?page=${p}`,
+      'sports-fashion':  (p) => `https://www.namshi.com/uae-en/women-clothing-sportswear/?page=${p}`,
     },
   },
 

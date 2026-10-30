@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import * as http from 'http';
+import { isAuthorizedUpgrade } from './utils/api-key';
 
 export interface LogEntry {
   ts: string;
@@ -40,7 +41,11 @@ export function getLogs(): LogEntry[] {
 }
 
 export function attachLogServer(server: http.Server): void {
-  const wss = new WebSocketServer({ server, path: '/ws/logs' });
+  const wss = new WebSocketServer({
+    server,
+    path: '/ws/logs',
+    verifyClient: ({ req }: { req: http.IncomingMessage }) => isAuthorizedUpgrade(req),
+  });
   wss.on('connection', (ws: WebSocket) => {
     // Send buffered history to new client
     for (const entry of logBuffer) {

@@ -33,6 +33,8 @@ export const TAXONOMY_BASE_TAGS: Record<string, Record<string, string[]>> = {
     'Oral Care':           ['personal-care', 'oral-care'],
     'Skin & Beauty':       ['personal-care', 'beauty', 'skincare'],
     Fragrance:             ['personal-care', 'beauty', 'fragrance'],
+    Skincare:              ['personal-care', 'beauty', 'skincare'],
+    Makeup:                ['personal-care', 'beauty', 'makeup'],
   },
   'Fitness & Sports': {
     'Cardio Equipment':    ['fitness', 'sports'],
@@ -48,9 +50,28 @@ export const TAXONOMY_BASE_TAGS: Record<string, Record<string, string[]>> = {
     Webcams:               ['office', 'computing', 'webcam'],
     Hubs:                  ['office', 'computing', 'hub'],
   },
+  // Keys must match the subCategory strings used in scrape-master.ts QUERIES exactly —
+  // a missing pair silently yields no base tags.
   'Baby & Kids': {
     'Baby Essentials':     ['baby', 'kids'],
     Toys:                  ['kids', 'toys', 'entertainment'],
+    'Toys & Games':        ['kids', 'toys', 'entertainment'],
+    Strollers:             ['baby', 'stroller', 'baby-gear'],
+    'Baby Gear':           ['baby', 'baby-gear'],
+    Safety:                ['baby', 'baby-safety'],
+    Nursery:               ['baby', 'nursery'],
+    Feeding:               ['baby', 'feeding'],
+    'Baby Care':           ['baby', 'baby-care'],
+    Clothing:              ['baby', 'kids', 'clothing'],
+  },
+  Fashion: {
+    Clothing:              ['fashion', 'clothing'],
+    'Women Clothing':      ['fashion', 'clothing', 'women'],
+    'Men Clothing':        ['fashion', 'clothing', 'men'],
+    Footwear:              ['fashion', 'footwear'],
+    Accessories:           ['fashion', 'accessories'],
+    'Modest Wear':         ['fashion', 'clothing', 'women', 'modest-wear'],
+    Kids:                  ['fashion', 'clothing', 'kids'],
   },
 };
 
