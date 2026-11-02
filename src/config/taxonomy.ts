@@ -6,6 +6,17 @@ export interface CategoryDef {
 
 // Canonical category hierarchy — broadCategory → subCategory → base tags
 export const TAXONOMY_BASE_TAGS: Record<string, Record<string, string[]>> = {
+  Groceries: {
+    'Fruits & Vegetables': ['grocery', 'groceries', 'fresh', 'fruits-vegetables'],
+    'Dairy & Eggs':        ['grocery', 'groceries', 'dairy'],
+    'Bakery':              ['grocery', 'groceries', 'bakery'],
+    'Beverages':           ['grocery', 'groceries', 'beverages'],
+    'Pantry & Staples':    ['grocery', 'groceries', 'pantry'],
+    'Snacks':              ['grocery', 'groceries', 'snacks'],
+    'Household':           ['grocery', 'groceries', 'household'],
+    'Baby':                ['grocery', 'groceries', 'baby'],
+    'General':             ['grocery', 'groceries'],
+  },
   Electronics: {
     Smartphones:           ['electronics', 'mobile', 'smartphone'],
     Laptops:               ['electronics', 'computing', 'laptop'],

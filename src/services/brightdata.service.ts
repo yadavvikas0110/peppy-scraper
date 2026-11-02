@@ -33,6 +33,9 @@ const UNLOCKER_ZONE = () => process.env.BRIGHT_DATA_UNLOCKER_ZONE || 'web_unlock
 export function unlockerCountryFor(targetUrl: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
   const host = new URL(targetUrl).hostname;
   if (/(^|\.)amazon\.ae$/i.test(host)) return (env.AMAZON_UNLOCKER_COUNTRY || 'ae').toLowerCase();
+  // Talabat grocery catalogues are location-gated: a non-UAE exit shows a different (or empty)
+  // dark-store, so the UAE grocery menu only appears from a UAE exit.
+  if (/(^|\.)talabat\.com$/i.test(host)) return (env.TALABAT_UNLOCKER_COUNTRY || 'ae').toLowerCase();
   return undefined;
 }
 

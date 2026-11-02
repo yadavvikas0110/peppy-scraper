@@ -92,7 +92,12 @@ function nameKey(name: string): string {
 function bundleKeys(b: BundledProduct): string[] {
   const keys = b.name ? [`name:${nameKey(b.name)}`] : [];
   for (const r of b.retailers) {
-    const k = offerIdentityKey(r.retailerId, r.productUrl);
+    // Prefer the marketplace id (same rule as sameListing): one retailer can list many
+    // distinct SKUs under a single catalogue/page URL (e.g. a grocery category page), so
+    // keying only on the URL would wrongly merge different products into one bundle.
+    const k = r.externalId
+      ? `${r.retailerId}:id:${r.externalId}`
+      : offerIdentityKey(r.retailerId, r.productUrl);
     if (k) keys.push(k);
   }
   return keys;
