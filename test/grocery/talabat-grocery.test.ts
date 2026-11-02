@@ -3,7 +3,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as path from 'path';
-import { parseTalabatGrocery, parseStoreSubcategories, parseAreaStoreRefs } from '../../src/grocery/talabat-grocery.parser';
+import { parseTalabatGrocery, parseStoreSubcategories, parseStoreSubcategoryHrefs, parseAreaStoreRefs } from '../../src/grocery/talabat-grocery.parser';
 import { collectTalabatGrocery } from '../../src/grocery/talabat-grocery.collector';
 import { crawlTalabatGrocery } from '../../src/grocery/grocery-crawl';
 import { TALABAT_PILOT } from '../../src/grocery/talabat-grocery.config';
@@ -83,6 +83,19 @@ describe('collectTalabatGrocery', () => {
       assert.ok(s.categorySlug.length > 0);
       assert.ok(s.subCategorySlug.length > 0);
     }
+  });
+
+  test('falls back to subcategory anchors from a store landing page', () => {
+    const storeHtml = `<html><body>
+      <a href="/uae/grocery/690014/slug/bananas/local?aid=1172">x</a>
+      <a href="/uae/grocery/690014/slug/dairy-eggs/milk?aid=1172">y</a>
+      <a href="/uae/grocery/690014/slug/bananas/local?aid=1172">dup</a>
+      <a href="/uae/grocery/690014/slug?aid=1172">store landing, not a subcategory</a>
+      <a href="/uae/groceries/1172/al-badaa">area, not a subcategory</a>
+    </body></html>`;
+    const hrefs = parseStoreSubcategoryHrefs(storeHtml);
+    assert.equal(hrefs.length, 2); // deduped; landing + area excluded
+    assert.ok(hrefs.every(u => u.startsWith('https://www.talabat.com/uae/grocery/690014/slug/')));
   });
 
   test('extracts unique store refs + max page from an area listing', () => {
