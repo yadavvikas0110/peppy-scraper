@@ -2,7 +2,7 @@ import { fetchHTMLViaUnlocker } from '../services/brightdata.service';
 import { pushToDatabase } from '../cron/push-pipeline';
 import { acquireLock, releaseLock, clearStopSignal, shouldStop as stopFileSet } from '../utils/stop-signal';
 import { BundledProduct } from '../parsers/types';
-import { parseAreaStoreRefs, parseStoreSubcategories, parseTalabatGrocery } from './talabat-grocery.parser';
+import { parseAreaStoreRefs, parseStoreSubcategories, parseStoreSubcategoryHrefs, parseTalabatGrocery } from './talabat-grocery.parser';
 import { itemToBundle } from './talabat-grocery.collector';
 import {
   DubaiArea,
@@ -55,9 +55,24 @@ function areaUrl(area: DubaiArea, page: number): string {
   return page > 1 ? `${base}?page=${page}` : base;
 }
 
-function subcategoryUrl(storeUrl: string, categorySlug: string, subCategorySlug: string, aid: string, page: number): string {
-  const base = `${storeUrl}/${categorySlug}/${subCategorySlug}?aid=${aid}`;
-  return page > 1 ? `${base}&page=${page}` : base;
+function subcategoryUrl(storeUrl: string, categorySlug: string, subCategorySlug: string, aid: string): string {
+  return `${storeUrl}/${categorySlug}/${subCategorySlug}?aid=${aid}`;
+}
+
+/** Append a page number to a listing URL (which already carries ?aid=). */
+function withPage(url: string, page: number): string {
+  if (page <= 1) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}page=${page}`;
+}
+
+/** category slug = 5th path segment of /<country>/grocery/<id>/<slug>/<cat>/<sub>. */
+function categorySlugOf(url: string): string {
+  try {
+    const seg = new URL(url).pathname.split('/').filter(Boolean); // [country, grocery, id, slug, cat, sub]
+    return seg[4] || 'groceries';
+  } catch {
+    return 'groceries';
+  }
 }
 
 /**
@@ -139,20 +154,26 @@ export async function crawlTalabatGrocery(opts: GroceryCrawlOptions = {}): Promi
     if (shouldStop()) { p.stopped = true; break; }
     if (crawled >= maxStores) break;
 
-    const storeHtml = await get(store.storeUrl);
+    // The catalogue is location-gated: the store page only renders its category tree with ?aid=.
+    const storeHtml = await get(`${store.storeUrl}?aid=${store.aid}`);
     if (!storeHtml) continue;
-    const subs = parseStoreSubcategories(storeHtml);
     crawled++; p.storesCrawled++;
-    logger.log(`[grocery-crawl] store ${store.branchId}: ${subs.length} subcategories (${p.requests}/${maxRequests} requests)`);
 
-    for (const sub of subs) {
+    // Prefer the __NEXT_DATA__ category tree; fall back to subcategory anchors in the page HTML.
+    const fromData = parseStoreSubcategories(storeHtml)
+      .map(s => subcategoryUrl(store.storeUrl, s.categorySlug, s.subCategorySlug, store.aid));
+    const subUrls = fromData.length ? fromData : parseStoreSubcategoryHrefs(storeHtml, TALABAT_ORIGIN);
+    logger.log(`[grocery-crawl] store ${store.branchId}: ${subUrls.length} subcategories via ${fromData.length ? 'next-data' : 'anchors'} (${p.requests}/${maxRequests} requests)`);
+
+    for (const base of subUrls) {
       if (p.requests >= maxRequests) { p.capReached = true; break; }
       if (shouldStop()) { p.stopped = true; break; }
       p.subcategories++;
+      const categorySlug = categorySlugOf(base);
       let page = 1;
       let pageCount = 1;
       do {
-        const url = subcategoryUrl(store.storeUrl, sub.categorySlug, sub.subCategorySlug, store.aid, page);
+        const url = withPage(base, page);
         const html = await get(url);
         if (!html) break;
         p.pagesFetched++;
@@ -163,8 +184,8 @@ export async function crawlTalabatGrocery(opts: GroceryCrawlOptions = {}): Promi
           if (item.sku && pushedSkus.has(item.sku)) continue;
           if (item.sku) pushedSkus.add(item.sku);
           const bundle = itemToBundle(item, {
-            subCategory: humanize(sub.categorySlug),
-            tags: ['grocery', 'groceries', sub.categorySlug],
+            subCategory: humanize(categorySlug),
+            tags: ['grocery', 'groceries', categorySlug],
             retailerId: TALABAT_RETAILER_ID,
             retailerName: TALABAT_RETAILER_NAME,
             sourceUrl: url,

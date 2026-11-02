@@ -155,6 +155,32 @@ export function parseStoreSubcategories(html: string): SubcategoryTarget[] {
   return targets;
 }
 
+// A store landing page links to each of its listings as /<country>/grocery/<id>/<slug>/<cat>/<sub>.
+// Parsing these anchors is a shape-independent fallback when __NEXT_DATA__ categories are absent.
+const SUBCAT_PATH_RE = /^\/[a-z-]+\/grocery\/\d+\/[^/?#]+\/[^/?#]+\/[^/?#]+$/i;
+
+/**
+ * Extract absolute subcategory listing URLs from a store landing page's anchors (query preserved,
+ * so the ?aid= stays). Deduped by path. Used when parseStoreSubcategories finds nothing.
+ */
+export function parseStoreSubcategoryHrefs(html: string, origin = 'https://www.talabat.com'): string[] {
+  const $ = cheerio.load(html);
+  const byPath = new Map<string, string>();
+  $('a[href]').each((_i, el) => {
+    const href = $(el).attr('href') || '';
+    let path: string;
+    try {
+      path = href.startsWith('http') ? new URL(href).pathname : href.split(/[?#]/)[0];
+    } catch {
+      return;
+    }
+    if (!SUBCAT_PATH_RE.test(path)) return;
+    const abs = href.startsWith('http') ? href : `${origin}${href}`;
+    if (!byPath.has(path)) byPath.set(path, abs);
+  });
+  return [...byPath.values()];
+}
+
 const STORE_PATH_RE = /\/[a-z-]+\/grocery\/(\d+)\/[^/?#]+/i;
 
 /**
