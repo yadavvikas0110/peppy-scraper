@@ -12,6 +12,7 @@
     "test:scrapedo": "node --require ts-node/register --require ./test/db-guard.ts --test test/shared/scrapedo/scrapedo.client.test.ts",
     "test:dining": "node --require ts-node/register --require ./test/db-guard.ts --test test/dining/*.test.ts test/shared/db/*.test.ts",
     "test:ecommerce": "node --require ts-node/register --require ./test/db-guard.ts --test test/ecommerce/*.test.ts",
+    "test:grocery": "node --require ts-node/register --require ./test/db-guard.ts --test test/grocery/*.test.ts",
     "dining:indexes": "node dist/src/dining/db/dining.ensure-indexes.js",
     "dining:identity-backfill": "node dist/src/dining/identity/identity.backfill.cli.js",
     "dining:identity-assign": "node dist/src/dining/identity/identity.assign.cli.js",
@@ -35,7 +36,11 @@
     "shopping:worker:status": "node --env-file=.env.dev dist/src/worker/worker.cli.js status",
     "shopping:worker:stop": "node --env-file=.env.dev dist/src/worker/worker.cli.js stop",
     "shopping:report": "node --env-file=.env.dev dist/src/worker/ingest-report.js",
-    "shopping:worker": "node dist/src/worker/worker.cli.js start"
+    "shopping:worker": "node dist/src/worker/worker.cli.js start",
+    "grocery:pilot:dev": "npm run -s build && node --env-file=.env.dev dist/src/grocery/grocery.cli.js",
+    "grocery:pilot:push:dev": "npm run -s build && node --env-file=.env.dev dist/src/grocery/grocery.cli.js --push",
+    "grocery:pilot:local": "node --require ts-node/register --env-file=.env src/grocery/grocery.cli.ts",
+    "grocery:pilot:local:push": "node --require ts-node/register --env-file=.env src/grocery/grocery.cli.ts --push"
   },
   "keywords": [],
   "author": "",

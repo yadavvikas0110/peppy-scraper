@@ -12,7 +12,9 @@ export function clearStopSignal(): void {
   try { fs.unlinkSync(STOP_FILE); } catch {}
 }
 
-export function acquireLock(mode: 'full' | 'demo' = 'full'): boolean {
+export type LockMode = 'full' | 'demo' | 'grocery';
+
+export function acquireLock(mode: LockMode = 'full'): boolean {
   try {
     fs.mkdirSync(path.dirname(LOCK_FILE), { recursive: true });
     if (fs.existsSync(LOCK_FILE)) {
@@ -37,7 +39,7 @@ export function releaseLock(): void {
   try { fs.unlinkSync(LOCK_FILE); } catch {}
 }
 
-export function readLock(): { pid: number; startedAt: string; mode?: 'full' | 'demo' } | null {
+export function readLock(): { pid: number; startedAt: string; mode?: LockMode } | null {
   if (!fs.existsSync(LOCK_FILE)) return null;
   try { return JSON.parse(fs.readFileSync(LOCK_FILE, 'utf8')); } catch { return null; }
 }

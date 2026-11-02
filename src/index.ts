@@ -10,6 +10,7 @@ import { scrapeBulk, closeBrowser, withoutEmbeddings } from './services/playwrig
 import { SiteKey } from './config/sites';
 import { runFullPipeline } from './cron/cron-runner';
 import { runDemoPipeline } from './cron/demo-runner';
+import { runGroceryCrawlJob, type GroceryCrawlProgress } from './grocery/grocery-crawl';
 import { attachLogServer, interceptConsole, getLogs } from './logger';
 import { LOCK_FILE, STOP_FILE, readLock } from './utils/stop-signal';
 import { requireScraperApiKey, isApiKeyEnforced } from './utils/api-key';
@@ -178,6 +179,41 @@ app.post('/api/demo', (_req, res) => {
   }
   res.json({ triggered: true });
   runDemoPipeline().catch(e => console.error('[demo] Pipeline failed:', e.message));
+});
+
+// ─── Talabat grocery crawl (Dubai) ────────────────────────────────────────────
+// Query params (all optional):
+//   smoke=1            → crawl a single store (cheap live validation)
+//   maxStores=<n>      → limit stores crawled
+//   maxRequests=<n>    → hard Bright Data request cap (budget guard)
+//   dryRun=1           → scrape + map but write nothing to the DB
+let lastGroceryProgress: (GroceryCrawlProgress & { finishedAt: string }) | null = null;
+
+app.post('/api/grocery/trigger', (req, res) => {
+  const lock = readLock();
+  if (lock) {
+    return res.json({ triggered: false, reason: 'Pipeline already running', startedAt: lock.startedAt, mode: lock.mode || 'full' });
+  }
+  const q = req.query;
+  const num = (v: unknown) => (typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : undefined);
+  const opts = {
+    dryRun: q.dryRun === '1' || q.dryRun === 'true',
+    maxStores: q.smoke === '1' || q.smoke === 'true' ? 1 : num(q.maxStores),
+    maxRequests: num(q.maxRequests),
+  };
+  res.json({ triggered: true, mode: 'grocery', options: opts });
+  runGroceryCrawlJob(opts)
+    .then(p => { if (p) lastGroceryProgress = { ...p, finishedAt: new Date().toISOString() }; })
+    .catch(e => console.error('[grocery] crawl failed:', e?.message ?? e));
+});
+
+app.get('/api/grocery/status', (_req, res) => {
+  const lock = readLock();
+  res.json({
+    running: !!lock && lock.mode === 'grocery',
+    startedAt: lock?.startedAt ?? null,
+    lastRun: lastGroceryProgress,
+  });
 });
 
 app.get('/api/logs', (_req, res) => {

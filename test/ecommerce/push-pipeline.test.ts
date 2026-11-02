@@ -212,6 +212,25 @@ describe('duplicate prevention', () => {
     assert.deepEqual(merged[0].retailers.map(r => [r.retailerId, r.price]), [['amazon', 3349], ['noon', 3399]]);
   });
 
+  test('distinct SKUs sharing one catalogue/page URL are NOT merged (grocery case)', () => {
+    const PAGE = 'https://www.talabat.com/uae/grocery/690014/store/bananas/local';
+    const merged = mergeDuplicateBundles([
+      bundle('Del Monte Banana - Ecuador, 150g', [offer('talabat', 2.15, PAGE, { externalId: '939827' })]),
+      bundle('Banana Lavida Medium Ripe, 900-1100g', [offer('talabat', 7.86, PAGE, { externalId: '931496' })]),
+      bundle('Banana AB Medium Ripe, 900-1100g', [offer('talabat', 9.25, PAGE, { externalId: '906808' })]),
+    ]);
+    assert.equal(merged.length, 3); // different SKUs ⇒ three products, not one page-blob
+  });
+
+  test('the same SKU under one page URL still merges', () => {
+    const PAGE = 'https://www.talabat.com/uae/grocery/690014/store/bananas/local';
+    const merged = mergeDuplicateBundles([
+      bundle('Del Monte Banana - Ecuador, 150g', [offer('talabat', 2.15, PAGE, { externalId: '939827' })]),
+      bundle('Del Monte Banana - Ecuador, 150g', [offer('talabat', 2.10, PAGE, { externalId: '939827', observedAt: '2026-10-29T11:00:00.000Z' })]),
+    ]);
+    assert.equal(merged.length, 1);
+  });
+
   test('writing the same scrape twice updates one document instead of inserting two', async () => {
     const col = new FakeCollection([{ name: 'Apple iPhone 16 128GB', updatedAt: new Date(SEEN), retailers: [{ retailerId: 'amazon', productUrl: 'https://www.amazon.ae/dp/B0DGHYDZR9?tag=peppy1121-21', price: 3500 }] }]);
     const p: MongoProduct = product(bundle('Apple iPhone 16 (128 GB) - Black', [offer('amazon', 3399, 'https://www.amazon.ae/dp/B0DGHYDZR9')]));
