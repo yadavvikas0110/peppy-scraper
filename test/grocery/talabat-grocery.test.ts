@@ -174,7 +174,7 @@ describe('parseNoonMinutes', () => {
     // productUrl is the real noon product page, unique per item, not double-appended.
     const urls = res.bundles.map(x => x.retailers[0].productUrl);
     assert.equal(new Set(urls).size, urls.length);
-    assert.ok(urls.every(u => /\/uae-en\/now-product\/[^/]+$/.test(u)), 'clean /now-product/<sku> URLs (no double-append)');
+    assert.ok(urls.every(u => typeof u === 'string' && /\/uae-en\/now-product\/[^/]+$/.test(u)), 'clean /now-product/<sku> URLs (no double-append)');
   });
 
   test('config: category URL + default categories resolve', () => {
