@@ -13,7 +13,7 @@ import { runDemoPipeline } from './cron/demo-runner';
 import { runGroceryCrawlJob, type GroceryCrawlProgress } from './grocery/grocery-crawl';
 import { runDeliverooGroceryJob } from './grocery/deliveroo-grocery.collector';
 import { attachLogServer, interceptConsole, getLogs } from './logger';
-import { LOCK_FILE, STOP_FILE, readLock } from './utils/stop-signal';
+import { LOCK_FILE, STOP_FILE, DELIVEROO_LOCK_FILE, readLock } from './utils/stop-signal';
 import { requireScraperApiKey, isApiKeyEnforced } from './utils/api-key';
 import { UnsupportedSitesError } from './config/transport-policy';
 
@@ -209,10 +209,12 @@ app.post('/api/grocery/trigger', (req, res) => {
 });
 
 // Deliveroo (Hop) grocery pilot. Query: dryRun=1 (default write), maxRequests=<n>.
+// Uses a Deliveroo-specific lock so it runs CONCURRENTLY with the Talabat crawl / e-commerce
+// pipeline — only a second simultaneous Deliveroo run is blocked.
 app.post('/api/grocery/deliveroo/trigger', (req, res) => {
-  const lock = readLock();
+  const lock = readLock(DELIVEROO_LOCK_FILE);
   if (lock) {
-    return res.json({ triggered: false, reason: 'Pipeline already running', startedAt: lock.startedAt, mode: lock.mode || 'full' });
+    return res.json({ triggered: false, reason: 'Deliveroo run already in progress', startedAt: lock.startedAt, mode: lock.mode || 'grocery' });
   }
   const q = req.query;
   const num = (v: unknown) => (typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : undefined);
@@ -223,10 +225,12 @@ app.post('/api/grocery/deliveroo/trigger', (req, res) => {
 
 app.get('/api/grocery/status', (_req, res) => {
   const lock = readLock();
+  const deliverooLock = readLock(DELIVEROO_LOCK_FILE);
   res.json({
     running: !!lock && lock.mode === 'grocery',
     startedAt: lock?.startedAt ?? null,
     lastRun: lastGroceryProgress,
+    deliveroo: { running: !!deliverooLock, startedAt: deliverooLock?.startedAt ?? null },
   });
 });
 

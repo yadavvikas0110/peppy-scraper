@@ -1,6 +1,13 @@
 import { fetchHTMLViaUnlocker } from '../services/brightdata.service';
 import { pushToDatabase } from '../cron/push-pipeline';
-import { acquireLock, releaseLock, clearStopSignal, shouldStop as stopFileSet } from '../utils/stop-signal';
+import {
+  acquireLock,
+  releaseLock,
+  clearStopSignal,
+  shouldStop as stopFileSet,
+  DELIVEROO_LOCK_FILE,
+  DELIVEROO_STOP_FILE,
+} from '../utils/stop-signal';
 import { BundledProduct } from '../parsers/types';
 import { parseDeliverooGrocery } from './deliveroo-grocery.parser';
 import { itemToBundle, itemUrl } from './talabat-grocery.collector';
@@ -123,11 +130,13 @@ export interface DeliverooRunResult {
 export async function runDeliverooGroceryJob(opts: DeliverooRunOptions = {}): Promise<DeliverooRunResult | null> {
   const logger = opts.logger ?? console;
   const dryRun = opts.dryRun ?? true;
-  if (!acquireLock('grocery')) {
-    logger.warn('[deliveroo] another pipeline holds the lock — not starting.');
+  // Platform-scoped lock: runs concurrently with the Talabat crawl / e-commerce pipeline (which hold
+  // the global lock), but still blocks a second simultaneous Deliveroo run.
+  if (!acquireLock('grocery', DELIVEROO_LOCK_FILE)) {
+    logger.warn('[deliveroo] another Deliveroo run holds the lock — not starting.');
     return null;
   }
-  clearStopSignal();
+  clearStopSignal(DELIVEROO_STOP_FILE);
   try {
     const { bundles, storesFetched, itemsSeen, warnings } = await collectDeliverooGrocery(
       opts.storeUrls ?? DELIVEROO_PILOT_STORES,
@@ -137,7 +146,7 @@ export async function runDeliverooGroceryJob(opts: DeliverooRunOptions = {}): Pr
     for (const w of warnings.slice(0, 20)) logger.warn(`[deliveroo] warn: ${w}`);
 
     let productsPushed = 0;
-    if (!dryRun && bundles.length && !stopFileSet()) {
+    if (!dryRun && bundles.length && !stopFileSet(DELIVEROO_STOP_FILE)) {
       const res: any = await pushToDatabase(bundles);
       productsPushed = (res.mongoInserted ?? 0) + (res.mongoUpdated ?? 0);
       logger.log(`[deliveroo] pushed: ${res.mongoInserted ?? 0} new, ${res.mongoUpdated ?? 0} updated`);
@@ -147,7 +156,7 @@ export async function runDeliverooGroceryJob(opts: DeliverooRunOptions = {}): Pr
     }
     return { storesFetched, itemsSeen, productsPushed, bundles: bundles.length, warnings };
   } finally {
-    releaseLock();
-    clearStopSignal();
+    releaseLock(DELIVEROO_LOCK_FILE);
+    clearStopSignal(DELIVEROO_STOP_FILE);
   }
 }

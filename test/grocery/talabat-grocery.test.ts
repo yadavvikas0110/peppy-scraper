@@ -9,6 +9,8 @@ import { crawlTalabatGrocery } from '../../src/grocery/grocery-crawl';
 import { parseDeliverooGrocery } from '../../src/grocery/deliveroo-grocery.parser';
 import { collectDeliverooGrocery } from '../../src/grocery/deliveroo-grocery.collector';
 import { TALABAT_PILOT } from '../../src/grocery/talabat-grocery.config';
+import * as os from 'os';
+import { acquireLock, releaseLock, readLock } from '../../src/utils/stop-signal';
 
 const DELIVEROO_FIXTURE = fs.readFileSync(
   path.join(__dirname, 'fixtures', 'deliveroo-hop.html'),
@@ -177,6 +179,30 @@ describe('collectTalabatGrocery', () => {
     assert.ok(p.requests <= 10);
     assert.equal(p.capReached, true); // the fixture store has many subcategories, so the cap trips
     assert.ok(p.itemsSeen > 0);
+  });
+
+  test('per-platform locks are independent: holding one does not block the other', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'peppy-lock-'));
+    const globalLock = path.join(dir, 'cron.lock');
+    const deliverooLock = path.join(dir, 'cron.grocery.deliveroo.lock');
+    try {
+      // Talabat/e-commerce holds the global lock…
+      assert.equal(acquireLock('grocery', globalLock), true);
+      // …Deliveroo can still take its own lock and run concurrently.
+      assert.equal(acquireLock('grocery', deliverooLock), true);
+      assert.ok(readLock(globalLock));
+      assert.ok(readLock(deliverooLock));
+      // But a SECOND Deliveroo run is refused while the first holds it.
+      assert.equal(acquireLock('grocery', deliverooLock), false);
+      // Releasing one leaves the other intact.
+      releaseLock(deliverooLock);
+      assert.equal(readLock(deliverooLock), null);
+      assert.ok(readLock(globalLock), 'global lock untouched by Deliveroo release');
+      releaseLock(globalLock);
+      assert.equal(readLock(globalLock), null);
+    } finally {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
   });
 
   test('dedupes by SKU across pages and caps at max', async () => {
