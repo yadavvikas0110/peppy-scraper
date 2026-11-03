@@ -6,7 +6,16 @@ import * as path from 'path';
 import { parseTalabatGrocery, parseStoreSubcategories, parseStoreSubcategoryHrefs, parseAreaStoreRefs } from '../../src/grocery/talabat-grocery.parser';
 import { collectTalabatGrocery } from '../../src/grocery/talabat-grocery.collector';
 import { crawlTalabatGrocery } from '../../src/grocery/grocery-crawl';
+import { parseDeliverooGrocery } from '../../src/grocery/deliveroo-grocery.parser';
+import { collectDeliverooGrocery } from '../../src/grocery/deliveroo-grocery.collector';
 import { TALABAT_PILOT } from '../../src/grocery/talabat-grocery.config';
+import * as os from 'os';
+import { acquireLock, releaseLock, readLock } from '../../src/utils/stop-signal';
+
+const DELIVEROO_FIXTURE = fs.readFileSync(
+  path.join(__dirname, 'fixtures', 'deliveroo-hop.html'),
+  'utf-8',
+);
 
 const FIXTURE = fs.readFileSync(
   path.join(__dirname, 'fixtures', 'talabat-grocery-bananas.html'),
@@ -43,6 +52,48 @@ describe('parseTalabatGrocery', () => {
     const empty = parseTalabatGrocery('<html><body>no data</body></html>', SRC_URL);
     assert.equal(empty.items.length, 0);
     assert.ok(empty.warnings.length > 0);
+  });
+});
+
+describe('parseDeliverooGrocery', () => {
+  const r = parseDeliverooGrocery(DELIVEROO_FIXTURE, 'https://deliveroo.ae/menu/Dubai/hopjlt/deliveroo-hop-goldcrest');
+
+  test('parses products with price in major units from __NEXT_DATA__', () => {
+    assert.ok(r.items.length >= 1);
+    for (const it of r.items) {
+      assert.ok(it.title.length > 0);
+      assert.ok(typeof it.price === 'number' && it.price >= 0);
+      assert.ok(it.sku); // Deliveroo item id → externalId
+    }
+  });
+
+  test('uses discounted price as current, base price as original (fractional/100)', () => {
+    const first = r.items[0];
+    assert.equal(first.price, 18.23);        // priceDiscounted 1823 → 18.23
+    assert.equal(first.originalPrice, 26.04); // price 2604 → 26.04
+    assert.equal(first.sku, '2832537561');
+    assert.equal(first.stockAmount! > 0, true); // available: true
+  });
+
+  test('missing payload yields no items, no throw', () => {
+    const empty = parseDeliverooGrocery('<html><body>x</body></html>', 'https://deliveroo.ae/menu/x/y/z');
+    assert.equal(empty.items.length, 0);
+    assert.ok(empty.warnings.length > 0);
+  });
+
+  test('collector produces Deliveroo Hop Groceries bundles with unique per-item URLs (no network/DB)', async () => {
+    const res = await collectDeliverooGrocery(['https://deliveroo.ae/menu/Dubai/hopjlt/deliveroo-hop-goldcrest'], {
+      fetchHtml: async () => DELIVEROO_FIXTURE,
+      logger: { log() {}, warn() {} },
+    });
+    assert.ok(res.bundles.length >= 1);
+    const b = res.bundles[0];
+    assert.equal(b.broadCategory, 'Groceries');
+    assert.equal(b.retailers[0].retailerId, 'deliveroo');
+    assert.equal(b.retailers[0].retailerName, 'Deliveroo Hop');
+    assert.equal(b.retailers[0].currency, 'AED');
+    const urls = res.bundles.map(x => x.retailers[0].productUrl);
+    assert.equal(new Set(urls).size, urls.length); // unique per item
   });
 });
 
@@ -128,6 +179,30 @@ describe('collectTalabatGrocery', () => {
     assert.ok(p.requests <= 10);
     assert.equal(p.capReached, true); // the fixture store has many subcategories, so the cap trips
     assert.ok(p.itemsSeen > 0);
+  });
+
+  test('per-platform locks are independent: holding one does not block the other', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'peppy-lock-'));
+    const globalLock = path.join(dir, 'cron.lock');
+    const deliverooLock = path.join(dir, 'cron.grocery.deliveroo.lock');
+    try {
+      // Talabat/e-commerce holds the global lock…
+      assert.equal(acquireLock('grocery', globalLock), true);
+      // …Deliveroo can still take its own lock and run concurrently.
+      assert.equal(acquireLock('grocery', deliverooLock), true);
+      assert.ok(readLock(globalLock));
+      assert.ok(readLock(deliverooLock));
+      // But a SECOND Deliveroo run is refused while the first holds it.
+      assert.equal(acquireLock('grocery', deliverooLock), false);
+      // Releasing one leaves the other intact.
+      releaseLock(deliverooLock);
+      assert.equal(readLock(deliverooLock), null);
+      assert.ok(readLock(globalLock), 'global lock untouched by Deliveroo release');
+      releaseLock(globalLock);
+      assert.equal(readLock(globalLock), null);
+    } finally {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
   });
 
   test('dedupes by SKU across pages and caps at max', async () => {
