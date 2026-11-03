@@ -23,7 +23,14 @@ export function itemUrl(sourceUrl: string, item: TalabatGroceryItem): string {
   if (!token) return sourceUrl;
   try {
     const u = new URL(sourceUrl);
-    u.pathname = `${u.pathname.replace(/\/+$/, '')}/${encodeURIComponent(token)}`;
+    const path = u.pathname.replace(/\/+$/, '');
+    // Idempotent: when the URL is already the item's own page (ends with the token), don't append
+    // again (noon passes a real per-product URL). Otherwise append to make a shared page URL unique.
+    if (path.endsWith(`/${encodeURIComponent(token)}`) || path.endsWith(`/${token}`)) {
+      u.pathname = path;
+    } else {
+      u.pathname = `${path}/${encodeURIComponent(token)}`;
+    }
     return u.toString();
   } catch {
     return sourceUrl;

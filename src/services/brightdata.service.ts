@@ -18,9 +18,18 @@ function getApiKey(): string {
   return key;
 }
 
-function getBrowserEndpoint(): string {
-  const auth = process.env.BRIGHT_DATA_BROWSER_AUTH;
+function getBrowserEndpoint(country?: string): string {
+  let auth = process.env.BRIGHT_DATA_BROWSER_AUTH;
   if (!auth) throw new Error('BRIGHT_DATA_BROWSER_AUTH is not set');
+  // Bright Data Scraping Browser targets an exit country via a `-country-<cc>` suffix on the
+  // username (the part before the ':' password). Some location-gated SPAs (e.g. noon Minutes)
+  // only render the UAE catalogue from a UAE exit.
+  if (country) {
+    const i = auth.indexOf(':');
+    if (i > 0 && !/-country-/i.test(auth.slice(0, i))) {
+      auth = `${auth.slice(0, i)}-country-${country.toLowerCase()}${auth.slice(i)}`;
+    }
+  }
   return `wss://${auth}@brd.superproxy.io:9222`;
 }
 
@@ -107,18 +116,20 @@ const _connecting = new Map<string, Promise<Browser>>();
 // Pages still in flight on a forgotten session get this long before it is closed
 const RETIRED_SESSION_GRACE_MS = 90000;
 
-async function getBrowserFor(host: string): Promise<Browser> {
-  const existing = _browsers.get(host);
+async function getBrowserFor(host: string, country?: string): Promise<Browser> {
+  // Pool key separates exit countries so a UAE-pinned session isn't reused for a default-exit host.
+  const key = country ? `${host}|${country}` : host;
+  const existing = _browsers.get(key);
   if (existing?.isConnected()) return existing;
   // Concurrent callers share one connect attempt; a failure rejects all of them.
-  const pending = _connecting.get(host);
+  const pending = _connecting.get(key);
   if (pending) return pending;
 
   const attempt = (async () => {
-    console.log(`[BD Browser] Connecting to Scraping Browser for ${host}...`);
+    console.log(`[BD Browser] Connecting to Scraping Browser for ${host}${country ? ` (country=${country})` : ''}...`);
     let browser: Browser;
     try {
-      browser = await chromium.connectOverCDP(getBrowserEndpoint(), { timeout: CONNECT_TIMEOUT_MS });
+      browser = await chromium.connectOverCDP(getBrowserEndpoint(country), { timeout: CONNECT_TIMEOUT_MS });
     } catch (e: any) {
       // Playwright error text includes the endpoint URL, which carries the zone password
       const auth = process.env.BRIGHT_DATA_BROWSER_AUTH;
@@ -126,19 +137,19 @@ async function getBrowserFor(host: string): Promise<Browser> {
       throw new Error(`[BD Browser] Connect failed: ${auth ? message.split(auth).join('***') : message}`);
     }
     browser.on('disconnected', () => {
-      console.warn(`[BD Browser] Session for ${host} disconnected — will reconnect on next request`);
-      if (_browsers.get(host) === browser) _browsers.delete(host);
+      console.warn(`[BD Browser] Session for ${key} disconnected — will reconnect on next request`);
+      if (_browsers.get(key) === browser) _browsers.delete(key);
     });
-    console.log(`[BD Browser] Connected (${host}).`);
-    _browsers.set(host, browser);
+    console.log(`[BD Browser] Connected (${key}).`);
+    _browsers.set(key, browser);
     return browser;
   })();
 
-  _connecting.set(host, attempt);
+  _connecting.set(key, attempt);
   try {
     return await attempt;
   } finally {
-    _connecting.delete(host);
+    _connecting.delete(key);
   }
 }
 
@@ -198,12 +209,13 @@ export async function fetchHTMLViaUnlocker(targetUrl: string): Promise<string> {
 export async function fetchHTMLViaBrowser(
   targetUrl: string,
   waitSelector?: string,
-  waitMs = 10000
+  waitMs = 10000,
+  country?: string
 ): Promise<string> {
   assertHostAllowed(targetUrl);
   return pageSemaphore().wrap(async () => {
     await requestGate?.('browser', targetUrl);
-    const browser = await getBrowserFor(new URL(targetUrl).hostname);
+    const browser = await getBrowserFor(new URL(targetUrl).hostname, country);
     // Isolated context per request: prevents cookies/cache leaking between concurrent scrapes
     const context = await browser.newContext();
     const page = await context.newPage();
