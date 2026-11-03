@@ -20,14 +20,22 @@ import {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-// Deliveroo serves Arabic by geo/cookie; its English menu lives at the un-prefixed path (the dining
-// adapter uses the same rule). Strip any /ar/ locale segment. NOTE: fully forcing EN may still need
-// an Accept-Language header on the fetch — tracked as a follow-up; parsing is language-agnostic.
+// Deliveroo.ae defaults an un-prefixed path (e.g. /menu/...) to Arabic by geo; the English catalogue
+// lives under an /en/ path prefix (verified: /en/menu/... returns language:"en" with identical SKUs
+// and prices). Force English by ensuring the path's first segment is "en" — rewrite "ar"→"en" or
+// prepend "en" when absent. Query string (geohash/day/time) is preserved.
 export function ensureEnglish(url: string): string {
   try {
     const u = new URL(url);
     const seg = u.pathname.split('/').filter(Boolean);
-    if (seg[0] === 'ar') { seg.shift(); u.pathname = `/${seg.join('/')}`; }
+    if (seg[0] === 'en') {
+      // already English — leave as-is
+    } else if (seg[0] === 'ar') {
+      seg[0] = 'en';
+    } else {
+      seg.unshift('en');
+    }
+    u.pathname = `/${seg.join('/')}`;
     return u.toString();
   } catch {
     return url;

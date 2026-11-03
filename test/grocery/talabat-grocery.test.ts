@@ -7,7 +7,7 @@ import { parseTalabatGrocery, parseStoreSubcategories, parseStoreSubcategoryHref
 import { collectTalabatGrocery } from '../../src/grocery/talabat-grocery.collector';
 import { crawlTalabatGrocery } from '../../src/grocery/grocery-crawl';
 import { parseDeliverooGrocery } from '../../src/grocery/deliveroo-grocery.parser';
-import { collectDeliverooGrocery } from '../../src/grocery/deliveroo-grocery.collector';
+import { collectDeliverooGrocery, ensureEnglish } from '../../src/grocery/deliveroo-grocery.collector';
 import { TALABAT_PILOT } from '../../src/grocery/talabat-grocery.config';
 import * as os from 'os';
 import { acquireLock, releaseLock, readLock } from '../../src/utils/stop-signal';
@@ -79,6 +79,24 @@ describe('parseDeliverooGrocery', () => {
     const empty = parseDeliverooGrocery('<html><body>x</body></html>', 'https://deliveroo.ae/menu/x/y/z');
     assert.equal(empty.items.length, 0);
     assert.ok(empty.warnings.length > 0);
+  });
+
+  test('ensureEnglish forces the /en/ locale prefix (verified to return English names)', () => {
+    // No locale → prepend /en, preserving query string.
+    assert.equal(
+      ensureEnglish('https://deliveroo.ae/menu/Dubai/hopjlt/deliveroo-hop-goldcrest?day=today&geohash=thrr3b148hez&time=ASAP'),
+      'https://deliveroo.ae/en/menu/Dubai/hopjlt/deliveroo-hop-goldcrest?day=today&geohash=thrr3b148hez&time=ASAP',
+    );
+    // Arabic → rewrite to English.
+    assert.equal(
+      ensureEnglish('https://deliveroo.ae/ar/menu/Dubai/hopjlt/store'),
+      'https://deliveroo.ae/en/menu/Dubai/hopjlt/store',
+    );
+    // Already English → unchanged.
+    assert.equal(
+      ensureEnglish('https://deliveroo.ae/en/menu/Dubai/hopjlt/store'),
+      'https://deliveroo.ae/en/menu/Dubai/hopjlt/store',
+    );
   });
 
   test('collector produces Deliveroo Hop Groceries bundles with unique per-item URLs (no network/DB)', async () => {
