@@ -8,6 +8,9 @@ import { collectTalabatGrocery } from '../../src/grocery/talabat-grocery.collect
 import { crawlTalabatGrocery } from '../../src/grocery/grocery-crawl';
 import { parseDeliverooGrocery } from '../../src/grocery/deliveroo-grocery.parser';
 import { collectDeliverooGrocery, ensureEnglish } from '../../src/grocery/deliveroo-grocery.collector';
+import { parseNoonMinutes } from '../../src/grocery/noon-minutes.parser';
+import { collectNoonMinutes } from '../../src/grocery/noon-minutes.collector';
+import { noonCategoryUrl, resolveNoonCategories } from '../../src/grocery/noon-minutes.config';
 import { TALABAT_PILOT } from '../../src/grocery/talabat-grocery.config';
 import * as os from 'os';
 import { acquireLock, releaseLock, readLock } from '../../src/utils/stop-signal';
@@ -19,6 +22,10 @@ const DELIVEROO_FIXTURE = fs.readFileSync(
 
 const FIXTURE = fs.readFileSync(
   path.join(__dirname, 'fixtures', 'talabat-grocery-bananas.html'),
+  'utf-8',
+);
+const NOON_FIXTURE = fs.readFileSync(
+  path.join(__dirname, 'fixtures', 'noon-minutes-milk.html'),
   'utf-8',
 );
 const SRC_URL = 'https://www.talabat.com/uae/grocery/690014/talabat-mart-just-fruits-veg-jumeirah-1/bananas/local?aid=1172';
@@ -112,6 +119,67 @@ describe('parseDeliverooGrocery', () => {
     assert.equal(b.retailers[0].currency, 'AED');
     const urls = res.bundles.map(x => x.retailers[0].productUrl);
     assert.equal(new Set(urls).size, urls.length); // unique per item
+  });
+});
+
+describe('parseNoonMinutes', () => {
+  const r = parseNoonMinutes(NOON_FIXTURE, 'https://minutes.noon.com/uae-en/search/?f%5Bcategory%5D=milk&rows=120');
+
+  test('parses product cards from the rendered grid (name, size, price, sku)', () => {
+    assert.equal(r.items.length, 3);
+    for (const it of r.items) {
+      assert.ok(it.title.length > 0);
+      assert.ok(typeof it.price === 'number' && it.price >= 0);
+      assert.ok(it.sku); // SKU from /now-product/<sku>/
+    }
+  });
+
+  test('maps a known card exactly, embedding size into the name', () => {
+    const choc = r.items.find(i => i.sku === 'Z2B3CAAC3A860E0DCBD5CZ-1');
+    assert.ok(choc, 'discounted chocolate milk present');
+    assert.equal(choc!.title, 'Nada Chocolate Low Fat Protein Milk, 320ml - 30g Protein');
+    assert.equal(choc!.price, 6.15);
+    assert.equal(choc!.originalPrice, 6.25); // was-price preserved
+    assert.equal(choc!.images.length, 1);
+  });
+
+  test('no discount → originalPrice is undefined (not equal to price)', () => {
+    const plain = r.items.find(i => i.sku === 'Z4577AB07BDEC8F616BC6Z-1');
+    assert.ok(plain);
+    assert.equal(plain!.price, 17.5);
+    assert.equal(plain!.originalPrice, undefined);
+  });
+
+  test('no product cards → empty items, no throw, warns', () => {
+    const empty = parseNoonMinutes('<html><body>loading…</body></html>', 'https://minutes.noon.com/uae-en/');
+    assert.equal(empty.items.length, 0);
+    assert.ok(empty.warnings.length > 0);
+  });
+
+  test('collector builds Noon Minutes Groceries bundles, drops image-less card, clean product URLs', async () => {
+    const res = await collectNoonMinutes({
+      categories: [{ slug: 'milk', subCategory: 'Dairy & Eggs' }],
+      fetchHtml: async () => NOON_FIXTURE,
+      logger: { log() {}, warn() {} },
+    });
+    // 3 cards parsed, but the image-less one is dropped by itemToBundle → 2 bundles.
+    assert.equal(res.itemsSeen, 3);
+    assert.equal(res.bundles.length, 2);
+    const b = res.bundles[0];
+    assert.equal(b.broadCategory, 'Groceries');
+    assert.equal(b.subCategory, 'Dairy & Eggs');
+    assert.equal(b.retailers[0].retailerId, 'noon-minutes');
+    assert.equal(b.retailers[0].retailerName, 'Noon Minutes');
+    assert.equal(b.retailers[0].currency, 'AED');
+    // productUrl is the real noon product page, unique per item, not double-appended.
+    const urls = res.bundles.map(x => x.retailers[0].productUrl);
+    assert.equal(new Set(urls).size, urls.length);
+    assert.ok(urls.every(u => /\/uae-en\/now-product\/[^/]+$/.test(u)), 'clean /now-product/<sku> URLs (no double-append)');
+  });
+
+  test('config: category URL + default categories resolve', () => {
+    assert.match(noonCategoryUrl('dairy_eggs'), /f%5Bcategory%5D=dairy_eggs/);
+    assert.ok(resolveNoonCategories().length > 0);
   });
 });
 

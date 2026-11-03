@@ -12,8 +12,9 @@ import { runFullPipeline } from './cron/cron-runner';
 import { runDemoPipeline } from './cron/demo-runner';
 import { runGroceryCrawlJob, type GroceryCrawlProgress } from './grocery/grocery-crawl';
 import { runDeliverooGroceryJob } from './grocery/deliveroo-grocery.collector';
+import { runNoonMinutesJob } from './grocery/noon-minutes.collector';
 import { attachLogServer, interceptConsole, getLogs } from './logger';
-import { LOCK_FILE, STOP_FILE, DELIVEROO_LOCK_FILE, readLock } from './utils/stop-signal';
+import { LOCK_FILE, STOP_FILE, DELIVEROO_LOCK_FILE, NOON_LOCK_FILE, readLock } from './utils/stop-signal';
 import { requireScraperApiKey, isApiKeyEnforced } from './utils/api-key';
 import { UnsupportedSitesError } from './config/transport-policy';
 
@@ -223,14 +224,30 @@ app.post('/api/grocery/deliveroo/trigger', (req, res) => {
   runDeliverooGroceryJob(opts).catch(e => console.error('[deliveroo] job failed:', e?.message ?? e));
 });
 
+// noon Minutes (Dubai) grocery crawl via Scraping Browser. Uses a noon-specific lock → runs
+// concurrently with Talabat/Deliveroo. Query: push=1 to write (default dry-run), maxRequests=<n>.
+app.post('/api/grocery/noon/trigger', (req, res) => {
+  const lock = readLock(NOON_LOCK_FILE);
+  if (lock) {
+    return res.json({ triggered: false, reason: 'Noon run already in progress', startedAt: lock.startedAt, mode: lock.mode || 'grocery' });
+  }
+  const q = req.query;
+  const num = (v: unknown) => (typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : undefined);
+  const opts = { dryRun: !(q.push === '1' || q.push === 'true'), max: num(q.maxRequests) };
+  res.json({ triggered: true, mode: 'grocery', platform: 'noon-minutes', options: opts });
+  runNoonMinutesJob(opts).catch(e => console.error('[noon] job failed:', e?.message ?? e));
+});
+
 app.get('/api/grocery/status', (_req, res) => {
   const lock = readLock();
   const deliverooLock = readLock(DELIVEROO_LOCK_FILE);
+  const noonLock = readLock(NOON_LOCK_FILE);
   res.json({
     running: !!lock && lock.mode === 'grocery',
     startedAt: lock?.startedAt ?? null,
     lastRun: lastGroceryProgress,
     deliveroo: { running: !!deliverooLock, startedAt: deliverooLock?.startedAt ?? null },
+    noon: { running: !!noonLock, startedAt: noonLock?.startedAt ?? null },
   });
 });
 

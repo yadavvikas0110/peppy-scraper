@@ -11,6 +11,8 @@ export const STOP_FILE = path.join(process.cwd(), 'output', 'stop.signal');
 // not silently clear a stop meant for Deliveroo, or vice-versa).
 export const DELIVEROO_LOCK_FILE = path.join(process.cwd(), 'output', 'cron.grocery.deliveroo.lock');
 export const DELIVEROO_STOP_FILE = path.join(process.cwd(), 'output', 'stop.grocery.deliveroo.signal');
+export const NOON_LOCK_FILE = path.join(process.cwd(), 'output', 'cron.grocery.noon.lock');
+export const NOON_STOP_FILE = path.join(process.cwd(), 'output', 'stop.grocery.noon.signal');
 
 export function shouldStop(stopFile: string = STOP_FILE): boolean {
   return fs.existsSync(stopFile);
