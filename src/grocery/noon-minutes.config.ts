@@ -55,12 +55,24 @@ export const NOON_ALL_CATEGORY_SLUGS: string[] = [
 ];
 
 /**
- * Resolve the category list to crawl. Default = food set. Override with NOON_CATEGORIES, a JSON
- * array of {slug,subCategory} or a comma-separated list of slugs (each mapped to "General").
+ * Every noon Minutes category (food set with proper Peppy subcategories + all remaining non-food
+ * categories mapped to "General"). This is the default crawl target for maximum coverage.
+ */
+export const NOON_FULL_CATEGORIES: NoonCategory[] = (() => {
+  const foodBySlug = new Map(NOON_FOOD_CATEGORIES.map(c => [c.slug, c]));
+  const allSlugs = Array.from(new Set([...NOON_ALL_CATEGORY_SLUGS, ...NOON_FOOD_CATEGORIES.map(c => c.slug)]));
+  return allSlugs.map(slug => foodBySlug.get(slug) ?? { slug, subCategory: 'General' });
+})();
+
+/**
+ * Resolve the category list to crawl. Default = FULL set (every category, for maximum data).
+ * Override with NOON_CATEGORIES, a JSON array of {slug,subCategory} or a comma-separated list of
+ * slugs (each mapped to "General"). Set NOON_CATEGORIES=food to crawl only the food set.
  */
 export function resolveNoonCategories(env: NodeJS.ProcessEnv = process.env): NoonCategory[] {
   const raw = env.NOON_CATEGORIES?.trim();
-  if (!raw) return NOON_FOOD_CATEGORIES;
+  if (!raw) return NOON_FULL_CATEGORIES;
+  if (raw.toLowerCase() === 'food') return NOON_FOOD_CATEGORIES;
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.every(c => c && typeof c.slug === 'string')) {
@@ -70,7 +82,7 @@ export function resolveNoonCategories(env: NodeJS.ProcessEnv = process.env): Noo
     // comma-separated slugs
     return raw.split(',').map(s => s.trim()).filter(Boolean).map(slug => ({ slug, subCategory: 'General' }));
   }
-  return NOON_FOOD_CATEGORIES;
+  return NOON_FULL_CATEGORIES;
 }
 
 /** Category listing URL. `rows` asks noon for a larger first page so one render yields more items. */
@@ -79,10 +91,13 @@ export function noonCategoryUrl(slug: string, rows = NOON_CRAWL_DEFAULTS.rowsPer
 }
 
 export const NOON_CRAWL_DEFAULTS = {
-  /** Hard cap on browser renders per run (budget guard — browser renders cost more than Unlocker). */
-  maxRequests: Number(process.env.NOON_MAX_REQUESTS || 60),
-  /** Products requested per category page render. */
-  rowsPerCategory: Number(process.env.NOON_ROWS || 120),
+  /**
+   * Budget guard on browser renders per run (renders cost more than Unlocker requests).
+   * NO CAP by default — render every category. Re-impose a cap with NOON_MAX_REQUESTS.
+   */
+  maxRequests: process.env.NOON_MAX_REQUESTS ? Number(process.env.NOON_MAX_REQUESTS) : Infinity,
+  /** Products requested per category page render (higher = more items per render = more data). */
+  rowsPerCategory: Number(process.env.NOON_ROWS || 500),
   /** Products pushed to Mongo per batch. */
   pushBatchSize: Number(process.env.GROCERY_PUSH_BATCH || 200),
   /** How long to wait for the product grid to render (ms). */

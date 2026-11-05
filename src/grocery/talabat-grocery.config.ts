@@ -80,13 +80,20 @@ export function resolveDubaiAreas(env: NodeJS.ProcessEnv = process.env): DubaiAr
 }
 
 export const GROCERY_CRAWL_DEFAULTS = {
-  /** Hard cap on Bright Data requests per run (budget guard). Each request ≈ 1 Unlocker credit. */
-  maxRequests: Number(process.env.GROCERY_MAX_REQUESTS || 4000),
+  /**
+   * Budget guard on Bright Data requests per run (each request ≈ 1 Unlocker credit).
+   * NO CAP by default: the crawl runs exhaustively until the whole Dubai catalogue is scraped
+   * (client has approved full credit spend). Re-impose a cap by setting GROCERY_MAX_REQUESTS.
+   */
+  maxRequests: process.env.GROCERY_MAX_REQUESTS ? Number(process.env.GROCERY_MAX_REQUESTS) : Infinity,
   /** Products pushed to Mongo per batch. */
   pushBatchSize: Number(process.env.GROCERY_PUSH_BATCH || 200),
-  /** Max area-listing pages to page through per area. */
-  maxAreaPages: Number(process.env.GROCERY_MAX_AREA_PAGES || 15),
-  /** Polite delay between requests (ms). */
+  /** Max area-listing pages to page through per area. No cap by default (page until no more stores). */
+  maxAreaPages: process.env.GROCERY_MAX_AREA_PAGES ? Number(process.env.GROCERY_MAX_AREA_PAGES) : Infinity,
+  /**
+   * Polite delay between requests (ms). Stays ON even with no budget cap: it prevents rate-limit
+   * bans that would otherwise burn credits on failed requests and REDUCE total data collected.
+   */
   requestDelayMs: Number(process.env.GROCERY_REQUEST_DELAY_MS || 250),
 };
 

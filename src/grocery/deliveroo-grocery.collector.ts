@@ -1,5 +1,5 @@
 import { fetchHTMLViaUnlocker } from '../services/brightdata.service';
-import { pushToDatabase } from '../cron/push-pipeline';
+import { pushGroceryToDatabase } from './db/grocery-push';
 import {
   acquireLock,
   releaseLock,
@@ -155,7 +155,7 @@ export async function runDeliverooGroceryJob(opts: DeliverooRunOptions = {}): Pr
 
     let productsPushed = 0;
     if (!dryRun && bundles.length && !stopFileSet(DELIVEROO_STOP_FILE)) {
-      const res: any = await pushToDatabase(bundles);
+      const res: any = await pushGroceryToDatabase(bundles);
       productsPushed = (res.mongoInserted ?? 0) + (res.mongoUpdated ?? 0);
       logger.log(`[deliveroo] pushed: ${res.mongoInserted ?? 0} new, ${res.mongoUpdated ?? 0} updated`);
     } else if (dryRun) {

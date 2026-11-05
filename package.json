@@ -13,6 +13,7 @@
     "test:dining": "node --require ts-node/register --require ./test/db-guard.ts --test test/dining/*.test.ts test/shared/db/*.test.ts",
     "test:ecommerce": "node --require ts-node/register --require ./test/db-guard.ts --test test/ecommerce/*.test.ts",
     "test:grocery": "node --require ts-node/register --require ./test/db-guard.ts --test test/grocery/*.test.ts",
+    "grocery:backfill-match-key": "ts-node src/grocery/grocery-backfill.cli.ts",
     "dining:indexes": "node dist/src/dining/db/dining.ensure-indexes.js",
     "dining:identity-backfill": "node dist/src/dining/identity/identity.backfill.cli.js",
     "dining:identity-assign": "node dist/src/dining/identity/identity.assign.cli.js",
@@ -40,7 +41,13 @@
     "grocery:pilot:dev": "npm run -s build && node --env-file=.env.dev dist/src/grocery/grocery.cli.js",
     "grocery:pilot:push:dev": "npm run -s build && node --env-file=.env.dev dist/src/grocery/grocery.cli.js --push",
     "grocery:pilot:local": "node --require ts-node/register --env-file=.env src/grocery/grocery.cli.ts",
-    "grocery:pilot:local:push": "node --require ts-node/register --env-file=.env src/grocery/grocery.cli.ts --push"
+    "grocery:pilot:local:push": "node --require ts-node/register --env-file=.env src/grocery/grocery.cli.ts --push",
+    "grocery:all": "npm run -s build && node --env-file=.env dist/src/grocery/grocery-all.cli.js",
+    "grocery:all:push": "npm run -s build && node --env-file=.env dist/src/grocery/grocery-all.cli.js --push",
+    "grocery:images:backfill": "npm run -s build && node --env-file=.env dist/src/grocery/grocery-images-backfill.js",
+    "grocery:images:backfill:dry-run": "npm run -s build && node --env-file=.env dist/src/grocery/grocery-images-backfill.js --dry-run",
+    "grocery:stores:seed": "npm run -s build && node --env-file=.env dist/src/grocery/db/grocery-stores.cli.js",
+    "grocery:stores:seed:dry-run": "npm run -s build && node --env-file=.env dist/src/grocery/db/grocery-stores.cli.js --dry-run"
   },
   "keywords": [],
   "author": "",

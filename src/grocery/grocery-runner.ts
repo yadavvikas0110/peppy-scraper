@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { pushToDatabase } from '../cron/push-pipeline';
+import { pushGroceryToDatabase } from './db/grocery-push';
 import { collectTalabatGrocery } from './talabat-grocery.collector';
 import { GROCERY_DEFAULT_MAX, TALABAT_PILOT } from './talabat-grocery.config';
 
@@ -52,7 +52,7 @@ export async function runTalabatGroceryPilot(opts: GroceryRunOptions = {}): Prom
   }
 
   logger.log(`[grocery] pushing ${bundles.length} products to products_clean…`);
-  const res: any = await pushToDatabase(bundles);
+  const res: any = await pushGroceryToDatabase(bundles);
   logger.log(`[grocery] Mongo: ${res.mongoInserted ?? 0} new, ${res.mongoUpdated ?? 0} updated`);
   if (res.chromaVectors !== undefined) logger.log(`[grocery] Chroma: ${res.chromaVectors} vectors`);
   if (res.mapping) logger.log(`[grocery] backend mapping: ${res.mapping.ok ? 'applied' : `NOT applied — ${res.mapping.message}`}`);

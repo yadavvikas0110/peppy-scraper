@@ -16,6 +16,7 @@ import { BundledProduct, RetailerOffer, StockStatus, toStockStatus } from '../pa
 import { embedBatch, isEmbeddingAvailable } from '../services/embedding.service';
 import { connectChroma, upsertProductsBatch, isChromaAvailable } from '../services/chroma.service';
 import { getMongoConfig, redactMongoUri } from '../shared/db/mongo';
+import { groceryMatchKey } from '../grocery/grocery-match-key';
 import { canonicalProductUrl, isAffiliateUrl, marketplaceIdFor, offerIdentityKey } from '../services/product-identity';
 import { SCRAPER_API_KEY_HEADER } from '../utils/api-key';
 
@@ -174,6 +175,8 @@ export interface MongoProduct {
   reviewCount?: number;
   tags: string[];
   retailers: MongoRetailerOffer[];
+  /** Cross-platform grocery identity (brand+size+noun); set only for Groceries. */
+  groceryMatchKey?: string;
 }
 
 function dropUndefined<T extends object>(obj: T): T {
@@ -215,6 +218,9 @@ export function toMongoProduct(bundle: BundledProduct): MongoProduct | null {
   const images = bundle.images.filter(Boolean);
   if (images.length === 0) return null; // reject no-image products
 
+  // Cross-platform grocery identity so the same item on Talabat/Deliveroo/Noon merges.
+  const gKey = broadCategory === 'Groceries' ? (groceryMatchKey(bundle.name) ?? undefined) : undefined;
+
   return dropUndefined({
     name:         bundle.name,
     description:  bundle.description ?? undefined,
@@ -226,6 +232,7 @@ export function toMongoProduct(bundle: BundledProduct): MongoProduct | null {
     reviewCount:  bundle.reviewCount ?? undefined,
     tags:         bundle.tags,
     retailers,
+    groceryMatchKey: gKey,
   });
 }
 
@@ -336,6 +343,7 @@ export function mergeProduct(existing: any | null, p: MongoProduct, now: Date): 
     rating,
     reviewCount,
     retailers,
+    groceryMatchKey: p.groceryMatchKey ?? existing?.groceryMatchKey,
     ...derivePricing(retailers, rating, reviewCount),
     ingestMappingStatus: 'pending',
     ingestPendingAt: now,
@@ -355,8 +363,10 @@ export function buildCandidateQuery(products: MongoProduct[]): Record<string, un
   const canonical = new Set<string>();
   const urls = new Set<string>();
   const asins = new Set<string>();
+  const gKeys = new Set<string>();
   for (const p of products) {
     names.add(p.name);
+    if (p.groceryMatchKey) gKeys.add(p.groceryMatchKey);
     for (const r of p.retailers) {
       if (r.externalId) ids.add(r.externalId);
       if (r.canonicalUrl) canonical.add(r.canonicalUrl);
@@ -365,6 +375,7 @@ export function buildCandidateQuery(products: MongoProduct[]): Record<string, un
     }
   }
   const or: Record<string, unknown>[] = [{ name: { $in: [...names] } }];
+  if (gKeys.size) or.push({ groceryMatchKey: { $in: [...gKeys] } });
   if (ids.size) or.push({ 'retailers.externalId': { $in: [...ids] } });
   if (canonical.size) or.push({ 'retailers.canonicalUrl': { $in: [...canonical] } });
   if (urls.size) or.push({ 'retailers.productUrl': { $in: [...urls] } });
@@ -402,6 +413,13 @@ export function findExistingDocument(p: MongoProduct, docs: any[]): any | null {
     byIdentity.sort((a, b) => String(a._id).localeCompare(String(b._id)));
   }
   if (byIdentity.length) return byIdentity[0];
+  // Cross-platform grocery identity: the same item on Talabat/Deliveroo/Noon has
+  // different titles but the same key, so it merges into one document.
+  if (p.groceryMatchKey) {
+    const byGrocery = docs.filter(d => d.groceryMatchKey === p.groceryMatchKey);
+    if (byGrocery.length > 1) byGrocery.sort((a, b) => String(a._id).localeCompare(String(b._id)));
+    if (byGrocery.length) return byGrocery[0];
+  }
   const key = nameKey(p.name);
   return docs.find(d => typeof d.name === 'string' && nameKey(d.name) === key) ?? null;
 }
@@ -535,7 +553,7 @@ export async function pushToDatabase(
   const now = opts.now ?? new Date();
   const write = async (col: ProductsCollection) => {
     // Support the identity lookups; the backend's Mongoose schema owns the other indexes
-    for (const field of ['retailers.productUrl', 'retailers.externalId', 'retailers.canonicalUrl', 'name', 'ingestMappingStatus']) {
+    for (const field of ['retailers.productUrl', 'retailers.externalId', 'retailers.canonicalUrl', 'name', 'ingestMappingStatus', 'groceryMatchKey']) {
       await col.createIndex?.({ [field]: 1 }, { background: true })
         .catch((e: any) => console.warn(`[push] Index ${field} not created: ${e.message}`));
     }

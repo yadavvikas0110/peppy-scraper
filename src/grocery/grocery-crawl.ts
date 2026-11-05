@@ -1,5 +1,5 @@
 import { fetchHTMLViaUnlocker } from '../services/brightdata.service';
-import { pushToDatabase } from '../cron/push-pipeline';
+import { pushGroceryToDatabase } from './db/grocery-push';
 import { acquireLock, releaseLock, clearStopSignal, shouldStop as stopFileSet } from '../utils/stop-signal';
 import { BundledProduct } from '../parsers/types';
 import { parseAreaStoreRefs, parseStoreSubcategories, parseStoreSubcategoryHrefs, parseTalabatGrocery } from './talabat-grocery.parser';
@@ -45,6 +45,15 @@ export interface GroceryCrawlProgress {
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/**
+ * Anti-runaway safety stop on pages per subcategory (NOT a budget cap): guards against a broken
+ * pageCount sending us into an endless pagination loop. Raised high so real deep catalogues are
+ * fully covered; override with GROCERY_MAX_SUBCAT_PAGES.
+ */
+const MAX_SUBCAT_PAGES = process.env.GROCERY_MAX_SUBCAT_PAGES
+  ? Number(process.env.GROCERY_MAX_SUBCAT_PAGES)
+  : 500;
 
 function humanize(slug: string): string {
   return slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim() || 'Groceries';
@@ -122,7 +131,7 @@ export async function crawlTalabatGrocery(opts: GroceryCrawlOptions = {}): Promi
     const batch = buffer.splice(0, buffer.length);
     if (dryRun) { logger.log(`[grocery-crawl] DRY RUN — would push ${batch.length} products`); return; }
     try {
-      const res: any = await pushToDatabase(batch);
+      const res: any = await pushGroceryToDatabase(batch);
       p.productsPushed += (res.mongoInserted ?? 0) + (res.mongoUpdated ?? 0);
       logger.log(`[grocery-crawl] pushed batch: ${res.mongoInserted ?? 0} new, ${res.mongoUpdated ?? 0} updated (total ${p.productsPushed})`);
     } catch (e: any) {
@@ -195,7 +204,7 @@ export async function crawlTalabatGrocery(opts: GroceryCrawlOptions = {}): Promi
         }
         await flush();
         page++;
-      } while (page <= pageCount && page <= 50); // 50-page hard stop per subcategory (safety)
+      } while (page <= pageCount && page <= MAX_SUBCAT_PAGES); // anti-runaway stop (not a budget cap)
     }
   }
 
