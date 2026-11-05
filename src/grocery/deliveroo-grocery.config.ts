@@ -12,8 +12,31 @@ export const DELIVEROO_PILOT_STORES: string[] = [
 ];
 
 export const DELIVEROO_CRAWL_DEFAULTS = {
-  /** Hard cap on Bright Data requests per run (budget guard). */
-  maxRequests: Number(process.env.DELIVEROO_MAX_REQUESTS || 500),
+  /**
+   * Budget guard on Bright Data requests per run. NO CAP by default — crawl every configured store
+   * fully. Re-impose a cap with DELIVEROO_MAX_REQUESTS. Each request ≈ 1 Unlocker credit.
+   */
+  maxRequests: process.env.DELIVEROO_MAX_REQUESTS ? Number(process.env.DELIVEROO_MAX_REQUESTS) : Infinity,
   pushBatchSize: Number(process.env.GROCERY_PUSH_BATCH || 200),
   requestDelayMs: Number(process.env.GROCERY_REQUEST_DELAY_MS || 250),
 };
+
+/**
+ * Resolve the Deliveroo Hop store menu URLs to crawl. Default = the confirmed pilot stores.
+ * Add the rest of Dubai's Hop stores via DELIVEROO_STORE_URLS (a JSON array of menu URLs, or a
+ * comma-separated list). Each URL must carry its store's geohash/day/time query, e.g.
+ *   https://deliveroo.ae/menu/Dubai/<slug>/<store>?day=today&geohash=<hash>&time=ASAP
+ * (Deliveroo locates dark stores by geohash, not by area id, so each store needs its own URL.)
+ */
+export function resolveDeliverooStores(env: NodeJS.ProcessEnv = process.env): string[] {
+  const raw = env.DELIVEROO_STORE_URLS?.trim();
+  if (!raw) return DELIVEROO_PILOT_STORES;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every(u => typeof u === 'string' && u.length > 0)) return parsed;
+  } catch {
+    const list = raw.split(',').map(s => s.trim()).filter(Boolean);
+    if (list.length) return list;
+  }
+  return DELIVEROO_PILOT_STORES;
+}
