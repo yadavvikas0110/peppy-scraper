@@ -171,7 +171,7 @@ app.post('/api/trigger', (_req, res) => {
     return res.json({ triggered: false, reason: 'Pipeline already running', startedAt: lock.startedAt, mode: lock.mode || 'full' });
   }
   res.json({ triggered: true });
-  runFullPipeline().catch(e => console.error('[trigger] Pipeline failed:', e.message));
+  runFullPipeline(undefined, { trigger: 'manual' }).catch(e => console.error('[trigger] Pipeline failed:', e.message));
 });
 
 app.post('/api/demo', (_req, res) => {
@@ -277,7 +277,7 @@ if (process.env.ENABLE_CRON === 'true') {
   } else {
     cron.schedule(schedule, async () => {
       console.log('[cron] Trigger — starting scheduled pipeline...');
-      await runFullPipeline().catch(e => console.error('[cron] Pipeline failed:', e.message));
+      await runFullPipeline(undefined, { trigger: 'cron' }).catch(e => console.error('[cron] Pipeline failed:', e.message));
     });
     console.log(`[cron] Scheduled: "${schedule}" (set ENABLE_CRON=false to disable)`);
   }

@@ -9,6 +9,7 @@ import { bundleProducts } from '../../src/services/bundler.service';
 import { buildJobId, getCheckpointPath, isResumeStateFresh, loadCheckpoint, saveCheckpoint } from '../../src/services/checkpoint.service';
 import { partitionSites, siteSupport, UnsupportedSitesError } from '../../src/config/transport-policy';
 import { CronDeps, runFullPipeline } from '../../src/cron/cron-runner';
+import { createInMemoryScrapeObsRecorder } from '../../src/observability/scrape-obs.recorder';
 import { QueryPlan } from '../../scrape-master';
 import { ProductData } from '../../src/parsers/types';
 
@@ -199,6 +200,7 @@ describe('cron run', () => {
       acquireLock: () => true,
       releaseLock: () => {},
       closeBrowser: async () => {},
+      recorder: createInMemoryScrapeObsRecorder(),
       stateFile: path.join(tmp, 'cron_state.json'),
       cooldownMs: 0,
     };
@@ -254,5 +256,21 @@ describe('cron run', () => {
     deps.stateFile = stateFile;
     await runFullPipeline(deps);
     assert.deepEqual(seen.sort(), ['q1', 'q2']);
+  });
+
+  test('observability: records a run, per-site outcomes, and site errors', async () => {
+    const deps = cronDeps(o => o.category === 'q1'
+      ? result('partial', { siteResults: [
+          { site: 'amazon', status: 'complete', scraped: 2, failed: 0 },
+          { site: 'noon', status: 'unsupported', scraped: 0, failed: 0, reason: 'no authorized source' },
+        ] })
+      : result('complete'));
+    const rec = deps.recorder as ReturnType<typeof createInMemoryScrapeObsRecorder>;
+    await runFullPipeline(deps, { trigger: 'manual' });
+
+    assert.equal(rec.runs.length, 1, 'one run opened');
+    assert.equal(rec.runs[0].status, 'partial', 'run finished with the pipeline status');
+    assert.ok(rec.siteOutcomes.some(s => s.outcome.site === 'amazon' && s.outcome.scraped === 2), 'amazon progress recorded');
+    assert.ok(rec.errors.some(e => e.input.stage === 'site' && e.input.site === 'noon'), 'unsupported site logged as an error');
   });
 });
