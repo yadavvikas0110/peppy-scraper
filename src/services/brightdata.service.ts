@@ -131,10 +131,12 @@ async function getBrowserFor(host: string, country?: string): Promise<Browser> {
     try {
       browser = await chromium.connectOverCDP(getBrowserEndpoint(country), { timeout: CONNECT_TIMEOUT_MS });
     } catch (e: any) {
-      // Playwright error text includes the endpoint URL, which carries the zone password
-      const auth = process.env.BRIGHT_DATA_BROWSER_AUTH;
-      const message = String(e?.message ?? e);
-      throw new Error(`[BD Browser] Connect failed: ${auth ? message.split(auth).join('***') : message}`);
+      // Playwright error text includes the endpoint URL, which carries the zone password.
+      // Redact ANY scheme://credentials@ occurrence, not just the raw env auth string — the
+      // endpoint auth is rewritten when an exit country is appended (user-country-xx:pass),
+      // which the plain env-string match missed, leaking the password into logs/observability.
+      const message = String(e?.message ?? e).replace(/([a-z]+:\/\/)[^@/\s]+@/gi, '$1***@');
+      throw new Error(`[BD Browser] Connect failed: ${message}`);
     }
     browser.on('disconnected', () => {
       console.warn(`[BD Browser] Session for ${key} disconnected — will reconnect on next request`);
