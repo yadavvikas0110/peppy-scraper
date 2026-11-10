@@ -122,11 +122,15 @@ describe('dining cron scheduler', () => {
     };
   };
 
-  test('not scheduled when ENABLE_DINING_CRON is not true', () => {
+  test('not scheduled when ENABLE_DINING_CRON is not true, but manual control stays available', () => {
     const s = fakeSchedule();
     const scheduler = startDiningCronScheduler({ env: { ENABLE_DINING_CRON: 'false' }, runJob: async () => assert.fail('must not run'), logger: silent, schedule: s.schedule });
-    assert.equal(scheduler, null);
-    assert.equal(s.calls.length, 0);
+    assert.ok(scheduler, 'control object must exist even when the schedule is off');
+    assert.equal(scheduler!.scheduled, false);
+    assert.equal(s.calls.length, 0, 'no cron task is registered');
+    assert.equal(scheduler!.nextRun(), null);
+    assert.equal(scheduler!.isRunning(), false);
+    assert.equal(scheduler!.stopCurrent(), false);
   });
 
   test('invalid configuration disables the cron instead of crashing', () => {

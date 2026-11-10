@@ -18,10 +18,11 @@ import { SiteKey } from './src/config/sites';
 import { isResumeStateFresh, resumeMaxAgeMs } from './src/services/checkpoint.service';
 
 // ─── Query plan ──────────────────────────────────────────────────────────────
-// 11 queries × 4 sites × 25 products = ~1100 raw products → target 1000+ bundles
+// The full plan below (QUERIES) is the single source of truth for the e-commerce pipeline:
+// the cron runner and the /api/config endpoint both import it. Keep taxonomy pairs in
+// src/config/taxonomy.ts in sync (enforced by test/ecommerce/config.test.ts).
 
 const ALL_SITES: SiteKey[] = ['amazon', 'noon', 'carrefour', 'sharafdg'];
-const ELECTRONICS_SITES: SiteKey[] = ['amazon', 'noon', 'carrefour', 'sharafdg', 'jumbo'];
 const BABY_SITES: SiteKey[] = ['mumzworld', 'letstango'];
 const FASHION_SITES: SiteKey[] = ['namshi'];
 

@@ -13,10 +13,17 @@ dotenv.config();
 
 const PORT = getDiningPort();
 const context = createDefaultDiningScrapeContext();
-const app = createDiningApp({ runScrape: request => runDiningScrape(request, context), searchService: createDefaultDiningSearchService() });
+// The scheduler is created up front (not in the listen callback) so the HTTP cron-control
+// endpoints can hold its handle; with ENABLE_DINING_CRON=false it registers no schedule but
+// still accepts manual triggers from the admin panel.
+const diningCron: DiningCronScheduler | null = startDiningCronScheduler({ runJob: createDefaultDiningCronRunner(context) });
+const app = createDiningApp({
+  runScrape: request => runDiningScrape(request, context),
+  searchService: createDefaultDiningSearchService(),
+  cronControl: diningCron,
+});
 
 const server = http.createServer(app);
-let diningCron: DiningCronScheduler | null = null;
 const CRON_STOP_TIMEOUT_MS = 25_000;
 
 server.on('error', (err: NodeJS.ErrnoException) => {
@@ -29,8 +36,8 @@ server.listen(PORT, () => {
   console.log(`[dining] Health endpoint: GET http://localhost:${PORT}/health`);
   console.log(`[dining] Scrape endpoint: POST http://localhost:${PORT}/api/dining/scrape (x-api-key required)`);
   console.log(`[dining] Search endpoint: GET http://localhost:${PORT}/api/dining/search?q=... (x-api-key required)`);
+  console.log(`[dining] Cron control:    GET/POST http://localhost:${PORT}/api/dining/cron/{status,trigger,stop} (x-api-key required)`);
   if (!getDiningApiKey()) console.warn('[dining] DINING_API_KEY is not set: scrape endpoints will refuse all requests');
-  diningCron = startDiningCronScheduler({ runJob: createDefaultDiningCronRunner(context) });
 });
 
 let shuttingDown = false;

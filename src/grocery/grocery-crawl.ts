@@ -86,7 +86,7 @@ function categorySlugOf(url: string): string {
 
 /**
  * Full Talabat (Dubai) grocery crawl, designed to run on the server:
- *   areas → stores (deduped) → subcategories → paginated product listings → products_clean.
+ *   areas → stores (deduped) → subcategories → paginated product listings → grocery_products.
  * Self-discovering (reads each store's category tree + each listing's pageCount), budget-capped,
  * idempotent (re-runs upsert, so a re-trigger safely resumes/refreshes), and stoppable.
  */

@@ -8,6 +8,8 @@ import { BundledProduct } from '../parsers/types';
 import { acquireLock, releaseLock, shouldStop, clearStopSignal } from '../utils/stop-signal';
 import { SCRAPER_API_KEY_HEADER } from '../utils/api-key';
 import { isResumeStateFresh, resumeMaxAgeMs } from '../services/checkpoint.service';
+import { getScrapeObsRecorder, ScrapeObsRecorder } from '../observability/scrape-obs.recorder';
+import { ScrapeObsTrigger } from '../observability/scrape-obs.collections';
 
 const PARALLEL_QUERIES = Math.max(1, parseInt(process.env.PARALLEL_QUERIES || '3', 10));
 
@@ -48,6 +50,7 @@ export interface CronDeps {
   acquireLock: () => boolean;
   releaseLock: () => void;
   closeBrowser: () => Promise<void>;
+  recorder: ScrapeObsRecorder;
   stateFile: string;
   cooldownMs: number;
 }
@@ -107,16 +110,46 @@ export const defaultCronDeps: CronDeps = {
   acquireLock: () => acquireLock('full'),
   releaseLock,
   closeBrowser: () => closeBrowser(),
+  recorder: getScrapeObsRecorder(),
   get stateFile() { return path.join(process.cwd(), 'output', 'cron_state.json'); },
   cooldownMs: 15000,
 };
 
-export async function runFullPipeline(deps: CronDeps = defaultCronDeps): Promise<RunSummary | undefined> {
+export interface RunPipelineOptions {
+  /** Where the run was started from. Defaults to 'cron'. */
+  trigger?: ScrapeObsTrigger;
+}
+
+function runTotalsFromState(state: CronState, productsFailed: number, extra?: Partial<Record<string, number>>) {
+  return {
+    queriesCompleted: state.completedQueries.length,
+    queriesFailed: state.failedQueries.length,
+    productsScraped: state.totalRawScraped,
+    productsFailed,
+    bundles: state.allBundles.length,
+    errorCount: state.totalErrors,
+    ...extra,
+  };
+}
+
+export async function runFullPipeline(
+  deps: CronDeps = defaultCronDeps,
+  options: RunPipelineOptions = {},
+): Promise<RunSummary | undefined> {
   if (!deps.acquireLock()) return undefined;
 
   const pipelineStart = Date.now();
   const state = loadCronState(deps.stateFile);
   const isResume = state.completedQueries.length > 0;
+
+  // Central source of truth: open an observability run record. runId is null when
+  // recording is disabled/unavailable, which makes every later recorder call a no-op.
+  let totalProductsFailed = 0;
+  const runId = await deps.recorder.startRun({
+    trigger: options.trigger ?? 'cron',
+    resumed: isResume,
+    queriesPlanned: deps.queries.length,
+  });
 
   console.log(`\n[cron] ══════════════════════════════════════════════════`);
   console.log(`[cron] Pipeline started at ${new Date().toISOString()}`);
@@ -164,13 +197,49 @@ export async function runFullPipeline(deps: CronDeps = defaultCronDeps): Promise
           console.error(`[cron] "${query.label}" FAILED: ${outcome.reason?.message}`);
           state.totalErrors++;
           if (!state.failedQueries.includes(query.label)) state.failedQueries.push(query.label);
+          await deps.recorder.recordError(runId, {
+            stage: 'query',
+            code: 'QUERY_REJECTED',
+            message: outcome.reason?.message ?? outcome.reason,
+            context: { query: query.label },
+          });
           continue;
         }
         const result = outcome.value;
         for (const o of result.siteResults) {
-          if (o.status !== 'complete' && o.status !== 'stopped' && !state.siteIssues.includes(describeIssue(o))) {
-            state.siteIssues.push(describeIssue(o));
+          // Per-retailer progress for this run (cumulative across queries, keyed by runId+site).
+          await deps.recorder.recordSiteOutcome(runId, {
+            site: o.site,
+            status: o.status,
+            scraped: o.scraped,
+            failed: o.failed,
+            skipped: o.skipped,
+            links: o.links,
+            reason: o.reason,
+          });
+          totalProductsFailed += o.failed ?? 0;
+          if (o.status !== 'complete' && o.status !== 'stopped') {
+            await deps.recorder.recordError(runId, {
+              stage: 'site',
+              site: o.site,
+              code: `SITE_${o.status.toUpperCase()}`,
+              message: o.reason ?? `${o.site}: ${o.status}`,
+              severity: 'warning',
+              context: { query: query.label },
+            });
+            if (!state.siteIssues.includes(describeIssue(o))) state.siteIssues.push(describeIssue(o));
           }
+        }
+        // Per-URL product failures — upserted on a stable key so resumes never duplicate them.
+        for (const e of result.errors) {
+          await deps.recorder.recordError(runId, {
+            errorKey: `${runId}:${query.categoryKey ?? query.category}:${e.url}`,
+            stage: 'scrape',
+            code: 'PRODUCT_FAILED',
+            message: e.message,
+            url: e.url,
+            context: { query: query.label },
+          });
         }
         if (result.status === 'stopped') {
           // Not completed: the query's checkpoint is kept and it resumes on the next run
@@ -180,6 +249,12 @@ export async function runFullPipeline(deps: CronDeps = defaultCronDeps): Promise
           console.error(`[cron] "${query.label}" FAILED — no site produced data.`);
           state.totalErrors++;
           if (!state.failedQueries.includes(query.label)) state.failedQueries.push(query.label);
+          await deps.recorder.recordError(runId, {
+            stage: 'query',
+            code: 'QUERY_NO_DATA',
+            message: `"${query.label}" produced no data from any site`,
+            context: { query: query.label },
+          });
         } else {
           state.allBundles.push(...result.bundles);
           state.totalRawScraped += result.totalScraped;
@@ -189,6 +264,8 @@ export async function runFullPipeline(deps: CronDeps = defaultCronDeps): Promise
         }
       }
       saveCronState(deps.stateFile, state);
+      // Live progress for the admin panel, refreshed after every batch.
+      await deps.recorder.updateProgress(runId, runTotalsFromState(state, totalProductsFailed));
 
       if (stopped || deps.shouldStop()) {
         stopped = true;
@@ -207,6 +284,7 @@ export async function runFullPipeline(deps: CronDeps = defaultCronDeps): Promise
       saveCronState(deps.stateFile, state);
       console.log(`[cron] ⛔ Stopped — ${state.completedQueries.length}/${deps.queries.length} queries kept for resume. Nothing pushed.`);
       summary = { status: 'stopped', bundles: state.allBundles.length, failedQueries: state.failedQueries, siteIssues: state.siteIssues };
+      await deps.recorder.finishRun(runId, 'stopped', runTotalsFromState(state, totalProductsFailed));
       await deps.reportStatus(false, 0, state.totalErrors, Date.now() - pipelineStart,
         `Stopped before completion (${state.completedQueries.length}/${deps.queries.length} queries); resumable, nothing published`);
       return summary;
@@ -244,11 +322,21 @@ export async function runFullPipeline(deps: CronDeps = defaultCronDeps): Promise
       ...(state.failedQueries.length ? [`failed queries: ${state.failedQueries.join(', ')}`] : []),
       ...pushResult.errors,
     ];
+    for (const pushErr of pushResult.errors) {
+      await deps.recorder.recordError(runId, { stage: 'push', code: 'PUSH_ERROR', message: pushErr });
+    }
+    await deps.recorder.finishRun(runId, status, runTotalsFromState(state, totalProductsFailed, {
+      mongoInserted: pushResult.mongoInserted,
+      mongoUpdated: pushResult.mongoUpdated,
+      staleMarked: staleCount,
+    }));
     await deps.reportStatus(status === 'complete', pushResult.mongoInserted + pushResult.mongoUpdated, state.totalErrors, elapsed,
       problems.length ? `Partial run: ${problems.join('; ').slice(0, 1000)}` : undefined);
   } catch (e: any) {
     fatalError = e.message;
     console.error(`[cron] Pipeline fatal error: ${e.message}`);
+    await deps.recorder.recordError(runId, { stage: 'fatal', code: 'PIPELINE_FATAL', message: e?.message ?? e });
+    await deps.recorder.finishRun(runId, 'failed', runTotalsFromState(state, totalProductsFailed));
     await deps.reportStatus(false, 0, state.totalErrors, Date.now() - pipelineStart, e.message);
   } finally {
     await deps.closeBrowser().catch(() => {});

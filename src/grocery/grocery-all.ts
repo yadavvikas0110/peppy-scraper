@@ -6,7 +6,7 @@ import { resolveNoonCategories } from './noon-minutes.config';
 import { resolveDubaiAreas } from './talabat-grocery.config';
 
 export interface AllGroceryOptions {
-  /** When false, products are written to products_clean. Defaults to true (read-only). */
+  /** When false, products are written to grocery_products. Defaults to true (read-only). */
   dryRun?: boolean;
   logger?: Pick<Console, 'log' | 'warn' | 'error'>;
 }
@@ -26,7 +26,7 @@ export interface AllGrocerySummary {
  * noon = NOON_LOCK_FILE, Deliveroo = DELIVEROO_LOCK_FILE), so they never clobber each other and a
  * second run of the same platform is still excluded. Politeness delays stay on to avoid rate-limit
  * bans. Each job is independently fault-isolated (Promise.allSettled): one platform failing never
- * aborts the others. Dry-run by default; pass dryRun:false (CLI --push) to write to products_clean.
+ * aborts the others. Dry-run by default; pass dryRun:false (CLI --push) to write to grocery_products.
  */
 export async function runAllGroceryJobs(opts: AllGroceryOptions = {}): Promise<AllGrocerySummary> {
   const dryRun = opts.dryRun ?? true;

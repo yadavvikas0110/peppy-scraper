@@ -2,7 +2,7 @@
  * Talabat Mart grocery pilot CLI.
  *
  *   node dist/src/grocery/grocery.cli.js            # dry run (default, writes nothing to DB)
- *   node dist/src/grocery/grocery.cli.js --push     # push products to products_clean
+ *   node dist/src/grocery/grocery.cli.js --push     # push products to grocery_products
  *   node dist/src/grocery/grocery.cli.js --max=15   # cap products collected
  *
  * Read-only by default on purpose: a DB write requires the explicit --push flag.
