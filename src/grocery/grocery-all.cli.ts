@@ -2,7 +2,7 @@
  * Full Dubai grocery crawl — ALL platforms (Talabat Mart + noon Minutes + Deliveroo Hop) in PARALLEL.
  *
  *   node dist/src/grocery/grocery-all.cli.js            # dry run (default, writes nothing to DB)
- *   node dist/src/grocery/grocery-all.cli.js --push     # push products to products_clean
+ *   node dist/src/grocery/grocery-all.cli.js --push     # push products to grocery_products
  *
  * No per-platform budget cap (client approved full Bright Data spend). Re-impose caps per platform
  * with GROCERY_MAX_REQUESTS / NOON_MAX_REQUESTS / DELIVEROO_MAX_REQUESTS. Widen coverage with

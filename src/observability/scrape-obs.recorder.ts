@@ -203,7 +203,10 @@ export function createMongoScrapeObsRecorder(deps: MongoRecorderDeps = {}): Scra
  * (fast rollback). It also no-ops safely if MONGODB_URI is unset or the DB is
  * unreachable — recording never blocks a scrape run.
  */
-export function getScrapeObsRecorder(env: NodeJS.ProcessEnv = process.env): ScrapeObsRecorder {
+export function getScrapeObsRecorder(
+  env: NodeJS.ProcessEnv = process.env,
+  subsystem: ScrapeObsSubsystem = 'ecommerce',
+): ScrapeObsRecorder {
   if (env.ENABLE_SCRAPE_OBS === 'false') return noopScrapeObsRecorder;
-  return createMongoScrapeObsRecorder();
+  return createMongoScrapeObsRecorder({ subsystem });
 }

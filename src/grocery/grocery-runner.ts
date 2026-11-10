@@ -5,7 +5,7 @@ import { collectTalabatGrocery } from './talabat-grocery.collector';
 import { GROCERY_DEFAULT_MAX, TALABAT_PILOT } from './talabat-grocery.config';
 
 export interface GroceryRunOptions {
-  /** When false, products are written to products_clean. Defaults to true (read-only). */
+  /** When false, products are written to grocery_products. Defaults to true (read-only). */
   dryRun?: boolean;
   max?: number;
   logger?: Pick<Console, 'log' | 'warn' | 'error'>;
@@ -22,7 +22,7 @@ function writeBackup(bundles: unknown[], logger: Pick<Console, 'log'>): string {
 }
 
 /**
- * Talabat Mart grocery pilot: scrape → bundle → (optionally) push to products_clean.
+ * Talabat Mart grocery pilot: scrape → bundle → (optionally) push to grocery_products.
  * Dry-run by default: it only writes a local JSON backup and pushes nothing.
  */
 export async function runTalabatGroceryPilot(opts: GroceryRunOptions = {}): Promise<void> {
@@ -44,14 +44,14 @@ export async function runTalabatGroceryPilot(opts: GroceryRunOptions = {}): Prom
   writeBackup(bundles, logger);
 
   if (dryRun) {
-    logger.log(`[grocery] DRY RUN — ${bundles.length} products NOT pushed. Re-run with --push to write to products_clean.`);
+    logger.log(`[grocery] DRY RUN — ${bundles.length} products NOT pushed. Re-run with --push to write to grocery_products.`);
     for (const b of bundles.slice(0, 10)) {
       logger.log(`   • ${b.name} — ${b.retailers[0]?.currency} ${b.retailers[0]?.price} [${b.subCategory}]`);
     }
     return;
   }
 
-  logger.log(`[grocery] pushing ${bundles.length} products to products_clean…`);
+  logger.log(`[grocery] pushing ${bundles.length} products to grocery_products…`);
   const res: any = await pushGroceryToDatabase(bundles);
   logger.log(`[grocery] Mongo: ${res.mongoInserted ?? 0} new, ${res.mongoUpdated ?? 0} updated`);
   if (res.chromaVectors !== undefined) logger.log(`[grocery] Chroma: ${res.chromaVectors} vectors`);

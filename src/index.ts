@@ -14,9 +14,16 @@ import { runGroceryCrawlJob, type GroceryCrawlProgress } from './grocery/grocery
 import { runDeliverooGroceryJob } from './grocery/deliveroo-grocery.collector';
 import { runNoonMinutesJob } from './grocery/noon-minutes.collector';
 import { attachLogServer, interceptConsole, getLogs } from './logger';
-import { LOCK_FILE, STOP_FILE, DELIVEROO_LOCK_FILE, NOON_LOCK_FILE, readLock } from './utils/stop-signal';
+import {
+  LOCK_FILE, STOP_FILE,
+  DELIVEROO_LOCK_FILE, DELIVEROO_STOP_FILE,
+  NOON_LOCK_FILE, NOON_STOP_FILE,
+  readLock,
+} from './utils/stop-signal';
 import { requireScraperApiKey, isApiKeyEnforced } from './utils/api-key';
-import { UnsupportedSitesError } from './config/transport-policy';
+import { siteSupport, UnsupportedSitesError } from './config/transport-policy';
+import { withGroceryObs } from './grocery/grocery-obs';
+import { QUERIES } from '../scrape-master';
 
 interceptConsole();
 
@@ -165,6 +172,77 @@ app.get('/api/status', (_req, res) => {
   res.json({ running: false });
 });
 
+// ─── Pipeline configuration (read-only; feeds the admin "Scraper Control Center") ─────────────
+// Single source of truth for what this service scrapes, so the admin panel never hard-codes it.
+const SITE_METHODS: Record<SiteKey, string> = {
+  amazon: 'Bright Data Unlocker (HTTP)',
+  noon: 'Bright Data Browser (CDP)',
+  carrefour: 'Bright Data Browser + Sitemap',
+  sharafdg: 'Bright Data Unlocker → Browser fallback',
+  jumbo: 'Bright Data Browser (CDP)',
+  mumzworld: 'Bright Data Unlocker (HTTP)',
+  namshi: 'Bright Data Browser (CDP)',
+  letstango: 'Shopify products.json (direct)',
+};
+
+app.get('/api/config', (_req, res) => {
+  const queriesByCategory: Record<string, number> = {};
+  for (const q of QUERIES) {
+    queriesByCategory[q.broadCategory] = (queriesByCategory[q.broadCategory] ?? 0) + 1;
+  }
+
+  let shoppingQueries: { total: number; enabled: number } | null = null;
+  try {
+    const file = process.env.SHOPPING_QUERIES_FILE || path.join(process.cwd(), 'config', 'shopping-queries.json');
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const list: Array<{ enabled?: boolean }> = Array.isArray(parsed) ? parsed : parsed.queries ?? [];
+    shoppingQueries = { total: list.length, enabled: list.filter(q => q.enabled !== false).length };
+  } catch { /* worker config not present on this host */ }
+
+  res.json({
+    service: 'peppy-scraper',
+    subsystems: {
+      ecommerce: {
+        label: 'Shopping (E-commerce)',
+        queryCount: QUERIES.length,
+        queriesByCategory,
+        cron: { enabled: process.env.ENABLE_CRON === 'true', schedule: process.env.SCRAPE_CRON || '0 2 * * *' },
+        sites: VALID_SITES.map(site => {
+          const support = siteSupport(site);
+          return {
+            key: site,
+            method: SITE_METHODS[site],
+            supported: support.supported,
+            reason: support.supported ? undefined : support.reason,
+          };
+        }),
+      },
+      grocery: {
+        label: 'Grocery (Dubai)',
+        platforms: [
+          { key: 'talabat', name: 'Talabat Mart', method: 'Bright Data Unlocker (HTTP)' },
+          { key: 'deliveroo', name: 'Deliveroo Hop', method: 'Bright Data Unlocker (HTTP)' },
+          { key: 'noon', name: 'noon Minutes', method: 'Bright Data Browser (CDP)' },
+        ],
+      },
+      dining: {
+        label: 'Dining (Restaurants)',
+        platforms: [
+          { key: 'deliveroo', name: 'Deliveroo', method: 'Scrape.do' },
+          { key: 'talabat', name: 'Talabat', method: 'Scrape.do' },
+        ],
+        note: 'Runs in the separate dining service (DINING_PORT).',
+      },
+      shopping: {
+        label: 'Shopping Worker (Amazon 24/7)',
+        platforms: [{ key: 'amazon', name: 'Amazon UAE', method: 'Bright Data Unlocker (HTTP)' }],
+        queries: shoppingQueries,
+        note: 'Separate long-running worker process (status-only; managed via PM2/systemd).',
+      },
+    },
+  });
+});
+
 app.post('/api/trigger', (_req, res) => {
   const lock = readLock();
   if (lock) {
@@ -204,7 +282,13 @@ app.post('/api/grocery/trigger', (req, res) => {
     maxRequests: num(q.maxRequests),
   };
   res.json({ triggered: true, mode: 'grocery', options: opts });
-  runGroceryCrawlJob(opts)
+  withGroceryObs('talabat', () => runGroceryCrawlJob(opts), p => ({
+    itemsSeen: p.itemsSeen,
+    productsPushed: p.productsPushed,
+    warnings: [],
+    errors: p.errors,
+    stopped: p.stopped,
+  }))
     .then(p => { if (p) lastGroceryProgress = { ...p, finishedAt: new Date().toISOString() }; })
     .catch(e => console.error('[grocery] crawl failed:', e?.message ?? e));
 });
@@ -221,7 +305,28 @@ app.post('/api/grocery/deliveroo/trigger', (req, res) => {
   const num = (v: unknown) => (typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : undefined);
   const opts = { dryRun: !(q.push === '1' || q.push === 'true'), max: num(q.maxRequests) };
   res.json({ triggered: true, mode: 'grocery', platform: 'deliveroo', options: opts });
-  runDeliverooGroceryJob(opts).catch(e => console.error('[deliveroo] job failed:', e?.message ?? e));
+  withGroceryObs('deliveroo', () => runDeliverooGroceryJob(opts), r => ({
+    itemsSeen: r.itemsSeen,
+    productsPushed: r.productsPushed,
+    warnings: r.warnings,
+    errors: [],
+    stopped: false,
+  })).catch(e => console.error('[deliveroo] job failed:', e?.message ?? e));
+});
+
+// Stop a running Deliveroo grocery crawl (platform-specific signal — never touches other runs).
+app.post('/api/grocery/deliveroo/stop', (_req, res) => {
+  if (!fs.existsSync(DELIVEROO_LOCK_FILE)) {
+    return res.json({ stopped: false, reason: 'Deliveroo grocery run not running' });
+  }
+  try {
+    fs.mkdirSync(path.dirname(DELIVEROO_STOP_FILE), { recursive: true });
+    fs.writeFileSync(DELIVEROO_STOP_FILE, JSON.stringify({ requestedAt: new Date().toISOString() }));
+    console.log('[deliveroo] Stop signal written — run will end after the current page.');
+    res.json({ stopped: true });
+  } catch (e: any) {
+    res.status(500).json({ stopped: false, reason: e.message });
+  }
 });
 
 // noon Minutes (Dubai) grocery crawl via Scraping Browser. Uses a noon-specific lock → runs
@@ -235,7 +340,28 @@ app.post('/api/grocery/noon/trigger', (req, res) => {
   const num = (v: unknown) => (typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : undefined);
   const opts = { dryRun: !(q.push === '1' || q.push === 'true'), max: num(q.maxRequests) };
   res.json({ triggered: true, mode: 'grocery', platform: 'noon-minutes', options: opts });
-  runNoonMinutesJob(opts).catch(e => console.error('[noon] job failed:', e?.message ?? e));
+  withGroceryObs('noon-minutes', () => runNoonMinutesJob(opts), r => ({
+    itemsSeen: r.itemsSeen,
+    productsPushed: r.productsPushed,
+    warnings: r.warnings,
+    errors: [],
+    stopped: false,
+  })).catch(e => console.error('[noon] job failed:', e?.message ?? e));
+});
+
+// Stop a running noon Minutes grocery crawl (platform-specific signal).
+app.post('/api/grocery/noon/stop', (_req, res) => {
+  if (!fs.existsSync(NOON_LOCK_FILE)) {
+    return res.json({ stopped: false, reason: 'Noon grocery run not running' });
+  }
+  try {
+    fs.mkdirSync(path.dirname(NOON_STOP_FILE), { recursive: true });
+    fs.writeFileSync(NOON_STOP_FILE, JSON.stringify({ requestedAt: new Date().toISOString() }));
+    console.log('[noon] Stop signal written — run will end after the current page.');
+    res.json({ stopped: true });
+  } catch (e: any) {
+    res.status(500).json({ stopped: false, reason: e.message });
+  }
 });
 
 app.get('/api/grocery/status', (_req, res) => {
