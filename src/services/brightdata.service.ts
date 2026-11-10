@@ -87,7 +87,7 @@ export function isAccessDeniedError(message: string): boolean {
 }
 
 // Our own credentials were rejected — no retry, host or session change can fix that
-const PROVIDER_AUTH_RE = /Unlocker API (401|403)\b|Invalid token|Invalid credentials|BRIGHT_DATA_[A-Z_]+ is not set/i;
+const PROVIDER_AUTH_RE = /Unlocker API (401|403)\b|Invalid token|Invalid credentials|Account is suspended|client_10020|BRIGHT_DATA_[A-Z_]+ is not set/i;
 
 export function isProviderAuthError(message: string): boolean {
   return PROVIDER_AUTH_RE.test(message);
@@ -196,6 +196,17 @@ export async function fetchHTMLViaUnlocker(targetUrl: string): Promise<string> {
 
     if (response.status !== 200) {
       const err = new Error(`Unlocker API ${response.status}: ${String(response.data).slice(0, 200)}`);
+      recordAccessDenied(targetUrl, err);
+      throw err;
+    }
+
+    // Bright Data can answer 200 with an EMPTY body and the real failure in headers
+    // (e.g. x-brd-err-code client_10020 "Account is suspended"). Without this check such
+    // runs "succeed" with zero products and no error anywhere in monitoring.
+    const brdErrCode = response.headers?.['x-brd-err-code'];
+    if (brdErrCode) {
+      const brdErrMsg = String(response.headers?.['x-brd-err-msg'] ?? '').slice(0, 200);
+      const err = new Error(`Unlocker provider error ${brdErrCode}: ${brdErrMsg || 'no detail'} (${targetUrl})`);
       recordAccessDenied(targetUrl, err);
       throw err;
     }

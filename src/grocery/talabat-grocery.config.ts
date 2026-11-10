@@ -61,10 +61,40 @@ export interface DubaiArea {
  * GROCERY_DUBAI_AREAS env override — a JSON array of {id,slug}). Seeded with confirmed Dubai areas.
  */
 export const DUBAI_AREAS: DubaiArea[] = [
+  // Original seed areas
   { id: '1169', slug: 'abu-hail' },
   { id: '1170', slug: 'academic-city' },
   { id: '1172', slug: 'al-badaa' },
   { id: '1173', slug: 'al-baraha' },
+  // Coverage for the Talabat Mart dark-store node list (ops, 2026-11-10). Area ids/slugs
+  // confirmed live from talabat.com/uae/all-areas/groceries.
+  // TM-MARINA-01/02 — Dubai Marina, JBR, Jumeirah Heights
+  { id: '1272', slug: 'dubai-marina' },
+  { id: '1305', slug: 'jumeirah-beach-residence-jbr' },
+  { id: '4009', slug: 'jumeirah-heights' },
+  // TM-SUFOUH-04 — Al Sufouh 2, Media City, Internet City
+  { id: '1232', slug: 'al-sufouh-2' },
+  { id: '1274', slug: 'dubai-media-city' },
+  { id: '1266', slug: 'dubai-internet-city-dic' },
+  // TM-SILICON-09 — Dubai Silicon Oasis, Liwan
+  { id: '1277', slug: 'dubai-silicon-oasis' },
+  { id: '5553', slug: 'liwan' },
+  // TM-DLAND-12 — Dubailand, Damac Hills
+  { id: '8909', slug: 'damac-hills' },
+  { id: '4006', slug: 'city-of-arabia' },
+  // TM-WARSAN-03 — International City, Warsan, Al Warqa
+  { id: '1292', slug: 'international-city' },
+  { id: '6801', slug: 'international-city-2' },
+  { id: '1363', slug: 'warsan-1' },
+  { id: '1241', slug: 'al-warqa-1' },
+  { id: '1242', slug: 'al-warqa-2' },
+  // TM-BBAY-07 — Downtown Dubai, Business Bay
+  { id: '1252', slug: 'business-bay' },
+  { id: '1258', slug: 'downtown-burj-khalifa' },
+  // TM-BARSHA-02 — Al Barsha 1, 2, 3
+  { id: '1174', slug: 'al-barsha-1' },
+  { id: '1175', slug: 'al-barsha-2' },
+  { id: '1176', slug: 'al-barsha-3' },
 ];
 
 export function resolveDubaiAreas(env: NodeJS.ProcessEnv = process.env): DubaiArea[] {

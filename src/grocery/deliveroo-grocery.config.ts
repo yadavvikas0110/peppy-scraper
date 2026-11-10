@@ -5,9 +5,16 @@
 export const DELIVEROO_RETAILER_ID = 'deliveroo';
 export const DELIVEROO_RETAILER_NAME = 'Deliveroo Hop';
 
-/** Confirmed Deliveroo Hop grocery store menu URLs (carry geohash/day/time for delivery context). */
+/**
+ * Confirmed Deliveroo Hop grocery store menu URLs (carry geohash/day/time for delivery context).
+ * Covers the three Dubai Hop dark stores (ops node list 2026-11-10):
+ *   DH-JLT-01   Goldcrest Views, Cluster V        → JLT, Jumeirah Islands, Springs
+ *   DH-DWTN-02  Burj Al Noujoum Tower, Al Asayel  → Downtown, Burj Khalifa zone
+ *   DH-DLAND-03 Control Tower, Al Hebiah 1        → Motor City, Sports City, Dubailand
+ */
 export const DELIVEROO_PILOT_STORES: string[] = [
   'https://deliveroo.ae/menu/Dubai/hopjlt/deliveroo-hop-goldcrest?day=today&geohash=thrr3b148hez&time=ASAP',
+  'https://deliveroo.ae/menu/Dubai/hopdt/deliveroo-hop-burj-al-noujoum-tower?day=today&geohash=thrr3fe45xk6&time=ASAP',
   'https://deliveroo.ae/menu/Dubai/hopmc/deliveroo-hop-motor-city?day=today&geohash=thrq24sm92j2&time=ASAP',
 ];
 
