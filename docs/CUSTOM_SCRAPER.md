@@ -21,11 +21,45 @@ The full result (products, rejections and reasons) goes to `output/custom/custom
 
 ## Setup: `.env.custom` (gitignored)
 
+On a server, these can also be set in the scraper service's own environment; the service's values take precedence.
+
 ```
 CUSTOM_MONGODB_URI=mongodb://<user>:<password>@<host>:27017/dev?authSource=admin
 CUSTOM_MONGODB_DB=dev
 CUSTOM_DB_ALLOWLIST=dev
-CUSTOM_SCRAPER_ENABLED=true        # false = the command exits without scraping
+CUSTOM_SCRAPER_ENABLED=true        # false = the command (and the admin trigger) does nothing
+
+# Images → our S3/CDN (required to save; --no-s3 overrides on the CLI only)
+S3_ACCESS_KEY_ID=
+S3_SECRET_ACCESS_KEY=
+S3_BUCKET=
+S3_REGION=
+CDN_URL=                            # e.g. https://<distribution>.cloudfront.net
+
+# Optional: ask OUR backend to map categories after a push (it must use the same database)
+CUSTOM_BACKEND_URL=
+CUSTOM_BACKEND_API_KEY=
+```
+
+## Control from the admin panel
+
+The admin panel's **System → Scraper Control** page has a **Custom Scraper (Shopping & Luxury)** card. From it you can:
+- pick sites and categories, and set products per category;
+- **Scrape & Save** or **Test Run (no save)**, and **Stop** a run;
+- see live progress in Live Logs, plus the last run's per-site results, saved counts and S3 counts.
+
+How a request flows:
+- Admin → backend `POST /admin/scraper/custom/trigger|stop`, which requires the `MANAGE_SCRAPER` permission.
+- Backend → scraper service `POST /api/custom/trigger|stop` and `GET /api/custom/status`.
+- The service starts the CLI above as a **child process**. The run therefore keeps its own lock and credential isolation, and can run alongside the Bright Data pipelines.
+
+Saving is refused with a clear reason until S3 and the database are configured on the scraper server.
+
+### Moving existing images to S3
+
+```bash
+npm run custom:images:s3:dry-run      # count (dev today: 1,249 documents, 5,445 images)
+npm run custom:images:s3              # migrate; failed uploads keep the retailer URL — re-run to retry
 ```
 
 It **never** reads the shared `MONGODB_URI`. It writes only to a database named in `CUSTOM_DB_ALLOWLIST`.

@@ -29,6 +29,18 @@ export interface CustomTriggerRequest {
 
 export interface CustomTriggerResult { triggered: boolean; reason?: string; startedAt?: string; args?: string[] }
 
+const ENV_FILE = () => path.join(process.cwd(), '.env.custom');
+
+/**
+ * The environment a run will see: the service's own variables win, .env.custom fills the rest —
+ * the same precedence `node --env-file` gives the child. Read without loading it into this process.
+ */
+export function effectiveCustomEnv(envFile = ENV_FILE(), env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  let fromFile: Record<string, string> = {};
+  try { fromFile = require('dotenv').parse(fs.readFileSync(envFile)); } catch { /* no file */ }
+  return { ...fromFile, ...Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined)) };
+}
+
 let child: ChildProcess | null = null;
 let current: { startedAt: string; args: string[] } | null = null;
 let lastExit: { code: number | null; finishedAt: string; error?: string } | null = null;
@@ -51,7 +63,7 @@ function cliCommand(): { cmd: string; args: string[] } {
   const cli = path.join(__dirname, `custom.cli${ext}`);
   // The custom scraper's own variables (CUSTOM_MONGODB_*, S3_*) live in .env.custom when present;
   // on a server they can be set in the service environment instead (inherited by the child).
-  const envFile = path.join(process.cwd(), '.env.custom');
+  const envFile = ENV_FILE();
   const pre = fs.existsSync(envFile) ? [`--env-file=${envFile}`] : [];
   return ext === '.ts'
     ? { cmd: process.execPath, args: [...pre, '-r', 'ts-node/register', cli] }
@@ -84,7 +96,14 @@ export function buildCliArgs(req: CustomTriggerRequest, configFile?: string): { 
 }
 
 export function triggerCustomRun(req: CustomTriggerRequest): CustomTriggerResult {
-  if (process.env.CUSTOM_SCRAPER_ENABLED === 'false') return { triggered: false, reason: 'Custom scraper is disabled (CUSTOM_SCRAPER_ENABLED=false)' };
+  const env = effectiveCustomEnv();
+  if (env.CUSTOM_SCRAPER_ENABLED === 'false') return { triggered: false, reason: 'Custom scraper is disabled (CUSTOM_SCRAPER_ENABLED=false)' };
+  if (req.push !== false && !(env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY && env.S3_BUCKET)) {
+    return { triggered: false, reason: 'Saving needs S3 settings on the scraper server (S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET, S3_REGION, CDN_URL). Use a test run, or configure S3.' };
+  }
+  if (req.push !== false && !env.CUSTOM_MONGODB_URI) {
+    return { triggered: false, reason: 'Saving needs CUSTOM_MONGODB_URI on the scraper server. Use a test run, or configure the database.' };
+  }
   const lock = readLock();
   if (child || lock) return { triggered: false, reason: 'Custom scraper already running', startedAt: current?.startedAt ?? lock?.startedAt };
 
@@ -163,7 +182,7 @@ export function lastCustomReport(dir = CUSTOM_REPORTS): Record<string, unknown> 
 export function customStatus() {
   const lock = readLock();
   return {
-    enabled: process.env.CUSTOM_SCRAPER_ENABLED !== 'false',
+    enabled: effectiveCustomEnv().CUSTOM_SCRAPER_ENABLED !== 'false',
     running: !!child || !!lock,
     startedAt: current?.startedAt ?? lock?.startedAt ?? null,
     args: current?.args ?? null,
@@ -189,14 +208,16 @@ export function customConfig() {
       categories: config.sites[site].map(t => ({ key: t.key, label: t.label, broadCategory: t.broadCategory, subCategory: t.subCategory, limit: t.limit })),
     }));
   } catch (e: any) { error = e.message; }
-  const uri = process.env.CUSTOM_MONGODB_URI?.trim();
+  const env = effectiveCustomEnv();
+  const uri = env.CUSTOM_MONGODB_URI?.trim();
+  // Host and database name only — never the credentials part of the URI
   const host = uri ? /^mongodb(?:\+srv)?:\/\/(?:[^@/]+@)?([^/?]+)/.exec(uri)?.[1] ?? null : null;
   return {
     label: 'Custom Scraper (no third party)',
-    enabled: process.env.CUSTOM_SCRAPER_ENABLED !== 'false',
+    enabled: env.CUSTOM_SCRAPER_ENABLED !== 'false',
     sites,
-    database: uri ? { host, name: process.env.CUSTOM_MONGODB_DB || null, allowlist: (process.env.CUSTOM_DB_ALLOWLIST || 'dev').split(',') } : null,
-    s3Configured: !!(process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY && process.env.S3_BUCKET),
+    database: uri ? { host, name: env.CUSTOM_MONGODB_DB || null, allowlist: (env.CUSTOM_DB_ALLOWLIST || 'dev').split(',') } : null,
+    s3Configured: !!(env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY && env.S3_BUCKET),
     ...(error ? { error } : {}),
   };
 }

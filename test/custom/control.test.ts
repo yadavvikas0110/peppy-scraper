@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ImageRehoster, PRODUCT_IMAGE_FOLDER, replaceStoredImageUrls } from '../../src/custom/core/images-s3';
-import { buildCliArgs, lastCustomReport } from '../../src/custom/custom.control';
+import { buildCliArgs, effectiveCustomEnv, lastCustomReport } from '../../src/custom/custom.control';
 import { parseCustomConfig } from '../../src/custom/custom.config';
 import { requestCustomMapping, runCustomScrape } from '../../src/custom/custom.runner';
 import { jumboAdapter } from '../../src/custom/adapters/jumbo.adapter';
@@ -70,6 +70,17 @@ describe('S3 image re-hosting', () => {
     assert.equal(pushed[0].retailers[0].imageUrl, `${CDN}/products/images/p1.jpg`);
     assert.equal(swappedWith!.get('https://cdn.jumbo.test/p1.jpg'), `${CDN}/products/images/p1.jpg`);
     assert.deepEqual(result.s3, { uploaded: 1, reused: 0, failed: 0, alreadyOwn: 0, storedDocumentsUpdated: 3, storedImagesReplaced: 4 });
+  });
+});
+
+describe('effective environment for runs', () => {
+  test('.env.custom fills gaps; the service environment wins; nothing is loaded into process.env', () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'custom-env-')), '.env.custom');
+    fs.writeFileSync(file, 'CUSTOM_MONGODB_URI=mongodb://u:p@h/dev\nCUSTOM_SCRAPER_ENABLED=true\nS3_BUCKET=from-file\n');
+    const env = effectiveCustomEnv(file, { S3_BUCKET: 'from-service' });
+    assert.equal(env.CUSTOM_MONGODB_URI, 'mongodb://u:p@h/dev');
+    assert.equal(env.S3_BUCKET, 'from-service');
+    assert.equal(process.env.CUSTOM_MONGODB_URI, undefined);
   });
 });
 
