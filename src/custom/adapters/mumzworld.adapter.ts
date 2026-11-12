@@ -1,5 +1,6 @@
 import { parseMumzworld } from '../../parsers/mumzworld.parser';
 import { parseMumzworldSearch } from '../../parsers/search/mumzworld.search.parser';
+import { findOriginalPrice } from '../core/embedded-price';
 import type { PlatformAdapter } from '../core/types';
 import { extractHtmlProduct } from './html-adapter';
 
@@ -29,5 +30,11 @@ export const mumzworldAdapter: PlatformAdapter = {
     return { urls };
   },
 
-  extract: (html, url) => extractHtmlProduct(html, url, parseMumzworld),
+  extract(html, url) {
+    const product = extractHtmlProduct(html, url, parseMumzworld);
+    // Magento GraphQL cache: price_range.minimum_price.{regular_price,final_price}; the pair whose
+    // final price equals this product's JSON-LD price is this product's own
+    product.originalPrice = findOriginalPrice(html, product.price, { regularKey: 'regular_price', finalKey: 'final_price', maxGap: 200 });
+    return product;
+  },
 };

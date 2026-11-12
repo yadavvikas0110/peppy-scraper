@@ -162,12 +162,15 @@ export interface MongoRetailerOffer {
   /** When the offer was observed on the retailer's site — never the time of the push */
   lastSeenAt?: Date;
   isStale?: boolean;
+  /** Regular price above `price` when the retailer shows a discount */
+  originalPrice?: number;
 }
 
 export interface MongoProduct {
   name: string;
   description?: string;
   brand?: string;
+  sku?: string;
   category: string;
   subcategory: string;
   images: string[];
@@ -206,6 +209,7 @@ export function toMongoOffer(r: RetailerOffer): MongoRetailerOffer | null {
     externalId:   r.externalId ?? marketplaceIdFor(r.retailerId, r.productUrl) ?? undefined,
     canonicalUrl: r.canonicalUrl ?? canonicalProductUrl(r.productUrl) ?? undefined,
     lastSeenAt:   toDate(r.observedAt),
+    originalPrice: hasPrice && typeof r.originalPrice === 'number' && r.originalPrice > r.price! ? r.originalPrice : undefined,
   });
 }
 
@@ -224,7 +228,8 @@ export function toMongoProduct(bundle: BundledProduct): MongoProduct | null {
   return dropUndefined({
     name:         bundle.name,
     description:  bundle.description ?? undefined,
-    brand:        extractBrand(bundle.tags),
+    brand:        bundle.brand || extractBrand(bundle.tags),
+    sku:          bundle.sku || undefined,
     category:     broadCategory,
     subcategory:  subCategory,
     images,
@@ -335,6 +340,7 @@ export function mergeProduct(existing: any | null, p: MongoProduct, now: Date): 
     name:        fill('name', p.name),
     description: fill('description', p.description),
     brand:       fill('brand', p.brand),
+    sku:         fill('sku', p.sku),
     category:    fill('category', p.category),
     subcategory: fill('subcategory', p.subcategory),
     images:      existing?.images?.length ? existing.images : p.images,

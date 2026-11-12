@@ -194,6 +194,8 @@ export function buildOffer(site: SiteKey, data: ProductData): RetailerOffer {
     externalId: marketplaceIdFor(site, data.productUrl),
     canonicalUrl: canonicalProductUrl(data.productUrl),
     observedAt: data.scrapedAt ?? null,
+    // Only a regular price above what the customer pays is a discount (key absent otherwise)
+    ...(data.originalPrice != null && data.price != null && data.originalPrice > data.price ? { originalPrice: data.originalPrice } : {}),
   };
 }
 
@@ -258,6 +260,8 @@ export async function bundleProducts(
       if (data.productName.length > (bestMatch.name?.length ?? 0)) {
         bestMatch.name = data.productName;
       }
+      bestMatch.brand ??= data.brand ?? null;
+      bestMatch.sku ??= data.sku ?? null;
     } else {
       if (bestReview) reviews.push(bestReview);
       bundles.push({
@@ -274,6 +278,8 @@ export async function bundleProducts(
         reviewCount: null,
         retailerCount: 0,
         retailers: [offer],
+        ...(data.brand ? { brand: data.brand } : {}),
+        ...(data.sku ? { sku: data.sku } : {}),
       });
     }
   }

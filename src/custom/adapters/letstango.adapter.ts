@@ -65,4 +65,25 @@ export const letstangoAdapter: PlatformAdapter = {
   extract() {
     throw new Error('letstango products come from the collection JSON; there is no page to extract');
   },
+
+  // Ratings are not in the Shopify JSON; the product page renders the Loox widget's
+  // data-rating / data-raters server-side (empty when the product has no reviews)
+  async enrich(product, fetcher) {
+    if (!product.productUrl) return product;
+    const page = `${ORIGIN}${new URL(product.productUrl).pathname}`;
+    const { status, body } = await fetcher.get(page);
+    if (status !== 200) return product;
+    return { ...product, ...parseLooxRating(body) };
+  },
 };
+
+/** <div class="loox-rating" data-rating="4.4" data-raters="65"> → rating 4.4, 65 reviews */
+export function parseLooxRating(html: string): { ratings: number | null; reviewCount: number | null } {
+  const tag = /<[^>]*class="[^"]*\bloox-rating\b[^"]*"[^>]*>/i.exec(html)?.[0] ?? '';
+  const rating = parseFloat(/data-rating="([\d.]*)"/.exec(tag)?.[1] ?? '');
+  const raters = parseInt(/data-raters="(\d*)"/.exec(tag)?.[1] ?? '', 10);
+  return {
+    ratings: Number.isFinite(rating) && rating > 0 && rating <= 5 ? rating : null,
+    reviewCount: Number.isFinite(raters) && raters > 0 ? raters : null,
+  };
+}

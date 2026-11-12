@@ -117,8 +117,14 @@ async function scrapeCategory(
 
   if (discovery.products) {
     report.candidates = discovery.products.length;
-    for (const p of discovery.products) {
-      if (report.valid >= target.limit) break;
+    for (let p of discovery.products) {
+      if (report.valid >= target.limit || opts.shouldStop()) break;
+      if (adapter.enrich && validateProduct(p).ok) {
+        try { p = await adapter.enrich(p, fetcher); } catch (e: any) {
+          if (e instanceof SiteBlockedError) throw e;
+          console.warn(`[custom:${site}] enrich failed for ${p.productUrl}: ${e.message} — kept without it`);
+        }
+      }
       accept(p, p.productUrl ?? `${site}:unknown`);
     }
     return report;

@@ -51,7 +51,9 @@
     "grocery:stores:seed:dry-run": "npm run -s build && node --env-file=.env dist/src/grocery/db/grocery-stores.cli.js --dry-run",
     "custom:scrape": "npm run -s build && node --env-file=.env.custom dist/src/custom/custom.cli.js",
     "custom:scrape:push": "npm run -s build && node --env-file=.env.custom dist/src/custom/custom.cli.js --push",
-    "custom:stop": "node -e \"require('fs').mkdirSync('output',{recursive:true});require('fs').writeFileSync('output/stop.custom.signal','')\""
+    "custom:stop": "node -e \"require('fs').mkdirSync('output',{recursive:true});require('fs').writeFileSync('output/stop.custom.signal','')\"",
+    "custom:images:clean:dry-run": "npm run -s build && node --env-file=.env.custom dist/src/custom/custom-images-cleanup.js --dry-run",
+    "custom:images:clean": "npm run -s build && node --env-file=.env.custom dist/src/custom/custom-images-cleanup.js"
   },
   "keywords": [],
   "author": "",

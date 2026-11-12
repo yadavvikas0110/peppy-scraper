@@ -57,16 +57,43 @@ validate   name + AED price + image + URL required; otherwise rejected with reas
 store      existing bundler → pushToDatabase(collection) → products_clean (ingestMappingStatus: pending)
 ```
 
-| Site | Discovery | Product data | Notes |
-|---|---|---|---|
-| Namshi | `/uae-en/<category>/` listing, HTTP | JSON-LD | No struck-through price; ratings on ~40% |
-| Mumzworld | `/en/<category>` listing, HTTP | JSON-LD | `/search/` is disallowed by robots.txt — never used |
-| Jumbo | category page rendered in local Chromium | JSON-LD over HTTP | `advance-for-…` pre-order deposits are skipped |
-| Letstango | `/collections/<handle>/products.json` | Shopify JSON | Shopify `vendor` is the seller, so no brand is taken; compare-at price → `originalPrice` |
+| Site | Discovery | Product data | Original price | Rating |
+|---|---|---|---|---|
+| Namshi | `/uae-en/<category>/` listing, HTTP | JSON-LD | `normalPrice` / `salePrice` in the app payload, anchored on the product URI | JSON-LD when present (~40%); the rest load client-side from an internal API, not scraped |
+| Mumzworld | `/en/<category>` listing, HTTP (`/search/` is disallowed by robots.txt) | JSON-LD | Magento `regular_price` / `final_price` | JSON-LD |
+| Jumbo | category page rendered in local Chromium; `advance-for-…` deposits skipped | JSON-LD over HTTP | Nuxt `regular_price` / `final_price` next to the product's `sku` | JSON-LD |
+| Letstango | `/collections/<handle>/products.json` | Shopify JSON | variant `compare_at_price` | Loox widget `data-rating` / `data-raters` on the product page (1 extra request per product) |
 
-Pushing does **not** call ChromaDB or the backend (`PEPPY_BE_URL` is blanked). Backend category, role and
-variant mapping for the pushed products is a separate step in `shikhar-peppy-backend`:
-`MONGODB_URI=<dev uri> npm run ingest:apply-mapping:dry-run`, then `npm run ingest:apply-mapping`.
+An original price is stored only when its paired selling price equals the price already read for that
+product, and it is above that price. A related product's prices on the same page are never used.
+Letstango has no brand: Shopify's `vendor` is the marketplace seller.
+
+**What reaches `products_clean`:**
+- Product: `brand`, `sku` (filled when missing), `category`, `subcategory`, `rating`, `reviewCount`.
+- Offer: `retailers[].originalPrice`, `price`, `stockStatus`, `lastSeenAt`.
+
+These fields already exist in the backend schema, so no schema change was needed.
+
+### Stored-image cleanup
+
+Earlier page-wide `<img>` scraping stored Mumzworld CMS banners and badges, plus related-product
+thumbnails, on product documents. The push keeps an existing document's images, so these need a one-off cleanup:
+
+```bash
+npm run custom:images:clean:dry-run   # report
+npm run custom:images:clean           # apply (allowlisted DB only; never empties a gallery)
+```
+
+Rules live in `src/custom/custom-images-cleanup.ts` (`IMAGE_RULES`).
+
+Pushing does **not** call ChromaDB or the backend (`PEPPY_BE_URL` is blanked). Backend mapping (app
+`categories`, `discoveryCategories`, `productRole`, variant groups) is a separate step in `shikhar-peppy-backend`.
+It maps **every** pending product in that database:
+
+```bash
+MONGODB_URI=<dev uri> npm run ingest:apply-mapping:dry-run
+MONGODB_URI=<dev uri> npm run ingest:apply-mapping
+```
 
 ## Adding a category or a site
 

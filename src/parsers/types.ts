@@ -15,6 +15,11 @@ export interface ProductData {
   subCategory?: string | null;
   /** ISO time the page was fetched — the only timestamp an offer's freshness may be based on */
   scrapedAt?: string;
+  /** Optional, set only by parsers that read them from structured data (custom scraper) */
+  brand?: string | null;
+  sku?: string | null;
+  /** Struck-through / regular price when the page states one above `price` */
+  originalPrice?: number | null;
 }
 
 export type Parser = (htmlOrJson: any, url: string) => ProductData;
@@ -48,6 +53,8 @@ export interface RetailerOffer {
   canonicalUrl?: string | null;
   /** ISO time this offer was observed on the retailer's site */
   observedAt?: string | null;
+  /** Regular price when this retailer shows a discount (backend: retailers[].originalPrice) */
+  originalPrice?: number | null;
 }
 
 export interface BundledProduct {
@@ -65,4 +72,7 @@ export interface BundledProduct {
   retailerCount: number;
   retailers: RetailerOffer[];
   embedding?: number[];
+  /** From structured data of the first retailer that states one (backend: brand / sku) */
+  brand?: string | null;
+  sku?: string | null;
 }

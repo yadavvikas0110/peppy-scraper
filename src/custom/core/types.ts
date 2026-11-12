@@ -24,13 +24,8 @@ export interface CategoryTarget {
   limit: number;
 }
 
-/** ProductData plus fields our structured-data extraction can also provide. */
-export interface CustomProduct extends ProductData {
-  brand?: string | null;
-  sku?: string | null;
-  /** Struck-through price when the page states one */
-  originalPrice?: number | null;
-}
+/** ProductData with the optional structured fields (brand, sku, originalPrice) this scraper fills. */
+export type CustomProduct = ProductData;
 
 export interface FetchResult {
   url: string;
@@ -59,4 +54,9 @@ export interface PlatformAdapter {
   discover(target: CategoryTarget, want: number, fetcher: CustomFetcher): Promise<Discovery>;
   /** Pure: product page HTML → product. Never throws for missing fields. */
   extract(html: string, url: string): CustomProduct;
+  /**
+   * Optional: add fields a structured discovery source lacks (Letstango ratings live on the
+   * product page). Called only for products about to be accepted; a failure keeps the product as is.
+   */
+  enrich?(product: CustomProduct, fetcher: CustomFetcher): Promise<CustomProduct>;
 }

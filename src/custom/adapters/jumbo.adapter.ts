@@ -1,5 +1,6 @@
 import { parseJumbo } from '../../parsers/jumbo.parser';
 import { parseJumboSearch } from '../../parsers/search/jumbo.search.parser';
+import { findOriginalPrice } from '../core/embedded-price';
 import type { PlatformAdapter } from '../core/types';
 import { extractHtmlProduct } from './html-adapter';
 
@@ -35,5 +36,12 @@ export const jumboAdapter: PlatformAdapter = {
     return { urls };
   },
 
-  extract: (html, url) => extractHtmlProduct(html, url, parseJumbo),
+  extract(html, url) {
+    const product = extractHtmlProduct(html, url, parseJumbo);
+    // Nuxt state: regular_price / final_price next to this product's own sku:"…"
+    product.originalPrice = product.sku
+      ? findOriginalPrice(html, product.price, { regularKey: 'regular_price', finalKey: 'final_price', anchor: `sku:"${product.sku}"` })
+      : null;
+    return product;
+  },
 };
