@@ -1,0 +1,40 @@
+{
+  "_comment": "Custom scraper (no third-party provider) — Shopping & Luxury categories. key is stable per site. source = listing path (namshi/mumzworld/jumbo) or Shopify collection handle (letstango). limit = valid products wanted. broadCategory/subCategory must exist in src/config/taxonomy.ts. Set enabled:false to pause a category.",
+  "settings": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "minIntervalMs": 2000,
+    "timeoutMs": 30000,
+    "maxRetries": 2,
+    "respectRobots": true,
+    "browserWaitMs": 8000
+  },
+  "sites": {
+    "namshi": [
+      { "key": "women-clothing",   "label": "Women Clothing",        "broadCategory": "Fashion", "subCategory": "Women Clothing", "source": "/uae-en/women-clothing/",               "limit": 3 },
+      { "key": "men-clothing",     "label": "Men Clothing",          "broadCategory": "Fashion", "subCategory": "Men Clothing",   "source": "/uae-en/men-clothing/",                 "limit": 3 },
+      { "key": "men-shoes",        "label": "Men Shoes",             "broadCategory": "Fashion", "subCategory": "Footwear",       "source": "/uae-en/men-shoes/",                    "limit": 3 },
+      { "key": "premium-bags",     "label": "Premium Women Bags",    "broadCategory": "Luxury",  "subCategory": "Bags",           "source": "/uae-en/premium/women-bags/",           "limit": 3 },
+      { "key": "eau-de-parfum",    "label": "Women Eau de Parfum",   "broadCategory": "Luxury",  "subCategory": "Fragrances",     "source": "/uae-en/women-beauty-fragrance-eau_de_parfum/", "limit": 3 },
+      { "key": "premium-women",    "label": "Premium Women Clothing", "broadCategory": "Luxury", "subCategory": "Designer Fashion", "source": "/uae-en/premium/women-clothing/",     "limit": 3 }
+    ],
+    "mumzworld": [
+      { "key": "feeding",          "label": "Feeding & Nursing",     "broadCategory": "Baby & Kids", "subCategory": "Feeding",    "source": "/en/feeding-and-nursing", "limit": 4 },
+      { "key": "toys",             "label": "Toys & Learning",       "broadCategory": "Baby & Kids", "subCategory": "Toys",       "source": "/en/toys-learning",       "limit": 4 },
+      { "key": "travel-gear",      "label": "Travel Gear",           "broadCategory": "Baby & Kids", "subCategory": "Baby Gear",  "source": "/en/travel-gear",         "limit": 4 },
+      { "key": "baby-clothing",    "label": "Baby Clothing & Shoes", "broadCategory": "Baby & Kids", "subCategory": "Clothing",   "source": "/en/baby-clothing-shoes", "limit": 4 }
+    ],
+    "jumbo": [
+      { "key": "smartphones",      "label": "Mobile Phones",         "broadCategory": "Electronics", "subCategory": "Smartphones",        "source": "/mobile-phones.html",                  "limit": 4 },
+      { "key": "laptops",          "label": "Laptops",               "broadCategory": "Electronics", "subCategory": "Laptops",            "source": "/personal-computers/laptops.html",     "limit": 4 },
+      { "key": "audio",            "label": "Headphones & Speakers", "broadCategory": "Electronics", "subCategory": "Audio & Headphones", "source": "/headphones-speakers.html",            "limit": 4 },
+      { "key": "wearables",        "label": "Wearables",             "broadCategory": "Electronics", "subCategory": "Wearables",          "source": "/wearables.html",                      "limit": 4 }
+    ],
+    "letstango": [
+      { "key": "mobile-phones",    "label": "Mobile Phones",         "broadCategory": "Electronics", "subCategory": "Smartphones",        "source": "mobile-phones",       "limit": 4 },
+      { "key": "laptops",          "label": "Laptops",               "broadCategory": "Electronics", "subCategory": "Laptops",            "source": "laptops",             "limit": 4 },
+      { "key": "headphones",       "label": "Headphones",            "broadCategory": "Electronics", "subCategory": "Audio & Headphones", "source": "headphones",          "limit": 4 },
+      { "key": "perfumes",         "label": "Perfumes & Fragrances", "broadCategory": "Luxury",      "subCategory": "Fragrances",         "source": "perfumes-fragrances", "limit": 4 },
+      { "key": "wrist-watches",    "label": "Wrist Watches",         "broadCategory": "Fashion",     "subCategory": "Accessories",        "source": "wrist-watches",       "limit": 4 }
+    ]
+  }
+}

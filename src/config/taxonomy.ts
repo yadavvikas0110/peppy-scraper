@@ -84,6 +84,14 @@ export const TAXONOMY_BASE_TAGS: Record<string, Record<string, string[]>> = {
     'Modest Wear':         ['fashion', 'clothing', 'women', 'modest-wear'],
     Kids:                  ['fashion', 'clothing', 'kids'],
   },
+  // Designer / premium goods (custom scraper). The backend's 'Luxury' category rules
+  // (shikhar-peppy-backend src/constants/product-categories.ts) match the same product types.
+  Luxury: {
+    Fragrances:            ['luxury', 'fragrance', 'perfume'],
+    Bags:                  ['luxury', 'fashion', 'bags'],
+    Watches:               ['luxury', 'watches'],
+    'Designer Fashion':    ['luxury', 'fashion', 'designer'],
+  },
 };
 
 export function getBroadCategoryBaseTags(broadCategory: string, subCategory: string): string[] {

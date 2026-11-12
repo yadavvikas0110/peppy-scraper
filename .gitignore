@@ -7,3 +7,6 @@ output/
 
 # local development overrides (point at the dev database, never committed)
 .env.dev
+
+# custom scraper database target (CUSTOM_MONGODB_URI) — never committed
+.env.custom
