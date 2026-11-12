@@ -143,4 +143,32 @@ describe('runner (offline)', () => {
     assert.deepEqual(file.rejected[0].reasons, ['no name', 'no price', 'no image']);
     assert.equal(file.products[0].product.scrapedAt, '2026-11-12T00:00:00.000Z');
   });
+
+  test('a page that redirected to another product is rejected; results survive a failed push', async () => {
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-'));
+    const redirecting: CustomFetcher = {
+      get: async url => url.endsWith('p1.html')
+        ? { url: 'https://www.jumbo.ae/other-product.html', status: 200, body: pages['https://www.jumbo.ae/p3.html'] }
+        : { url, status: pages[url] ? 200 : 404, body: pages[url] ?? '' },
+      render: async () => '',
+    };
+    await assert.rejects(runCustomScrape(config, {
+      sites: ['jumbo'], ai: false, outputDir: out, shouldStop: () => false, push: { uri: 'mongodb://localhost/dev', dbName: 'dev' },
+    }, {
+      adapters: { jumbo: adapter } as any, fetcher: redirecting,
+      push: async () => { throw new Error('DB timeout'); },
+    }), /DB timeout/);
+    const [file] = fs.readdirSync(out);
+    const saved = JSON.parse(fs.readFileSync(path.join(out, file), 'utf8'));
+    assert.match(saved.rejected[0].reasons[0], /redirected to https:\/\/www\.jumbo\.ae\/other-product\.html/);
+    assert.equal(saved.products.length, 2); // scraped data kept even though the push failed
+  });
+
+  test('a stop noticed inside a category ends the site as stopped', async () => {
+    let calls = 0;
+    const result = await runCustomScrape(config, {
+      sites: ['jumbo'], ai: false, outputDir: fs.mkdtempSync(path.join(os.tmpdir(), 'custom-')), shouldStop: () => ++calls > 2,
+    }, { adapters: { jumbo: adapter } as any, fetcher });
+    assert.equal(result.sites[0].status, 'stopped');
+  });
 });

@@ -53,7 +53,9 @@
     "custom:scrape:push": "npm run -s build && node --env-file=.env.custom dist/src/custom/custom.cli.js --push",
     "custom:stop": "node -e \"require('fs').mkdirSync('output',{recursive:true});require('fs').writeFileSync('output/stop.custom.signal','')\"",
     "custom:images:clean:dry-run": "npm run -s build && node --env-file=.env.custom dist/src/custom/custom-images-cleanup.js --dry-run",
-    "custom:images:clean": "npm run -s build && node --env-file=.env.custom dist/src/custom/custom-images-cleanup.js"
+    "custom:images:clean": "npm run -s build && node --env-file=.env.custom dist/src/custom/custom-images-cleanup.js",
+    "custom:images:s3:dry-run": "npm run -s build && node --env-file=.env.custom dist/src/custom/custom-images-s3.js --dry-run",
+    "custom:images:s3": "npm run -s build && node --env-file=.env.custom dist/src/custom/custom-images-s3.js"
   },
   "keywords": [],
   "author": "",

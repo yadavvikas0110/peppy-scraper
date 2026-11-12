@@ -2,15 +2,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { bundleProducts } from '../services/bundler.service';
 import { initVectorTagger } from '../services/vector-tagger.service';
-import { pushToDatabase, PushResult } from '../cron/push-pipeline';
+import { pushToDatabase, PushResult, requestIngestMapping } from '../cron/push-pipeline';
 import type { BundledProduct } from '../parsers/types';
 import { ADAPTERS } from './adapters';
 import { LocalBrowser } from './core/browser';
-import { HttpFetcher, RobotsDisallowedError, SiteBlockedError } from './core/http';
+import { HttpFetcher, RobotsDisallowedError, samePage, SiteBlockedError } from './core/http';
 import type { CategoryTarget, CustomFetcher, CustomProduct, CustomSite, PlatformAdapter } from './core/types';
 import { coverage, validateProduct } from './core/validate';
 import type { CustomScraperConfig } from './custom.config';
 import { CustomDbTarget, describeTarget, withCustomProductsCollection } from './custom.db';
+import { ImageRehoster, RehostStats, replaceStoredImageUrls } from './core/images-s3';
 
 export interface ScrapedItem {
   site: CustomSite;
@@ -44,6 +45,8 @@ export interface CustomRunResult {
   requests: { http: number; browserRenders: number };
   outputFile: string;
   push?: PushResult & { target: string; bundles: number };
+  /** Image re-hosting on our S3/CDN (only with push + S3) */
+  s3?: RehostStats & { storedDocumentsUpdated: number; storedImagesReplaced: number };
 }
 
 export interface RunOptions {
@@ -53,6 +56,8 @@ export interface RunOptions {
   /** Overrides every category's limit */
   limit?: number;
   push?: CustomDbTarget;
+  /** Re-host images on S3 before pushing (required for push unless explicitly skipped) */
+  s3?: ImageRehoster;
   ai: boolean;
   outputDir: string;
   shouldStop: () => boolean;
@@ -63,20 +68,29 @@ export interface RunDeps {
   fetcher?: CustomFetcher & { requests?: number; renders?: number; close?: () => Promise<void> };
   bundle: typeof bundleProducts;
   push: (bundles: BundledProduct[], target: CustomDbTarget) => Promise<PushResult>;
+  replaceStoredImages: (mapping: Map<string, string>, target: CustomDbTarget) => Promise<{ documents: number; images: number; conflicts: number }>;
   now: () => Date;
 }
 
+/**
+ * Category / role / variant mapping is the backend's job. It is requested only when
+ * CUSTOM_BACKEND_URL (+ CUSTOM_BACKEND_API_KEY) point at OUR backend — which must use the same
+ * database the custom scraper writes to. Otherwise products stay pending for `ingest:apply-mapping`.
+ */
+export async function requestCustomMapping(env: NodeJS.ProcessEnv = process.env): Promise<{ ok: boolean; message: string; mapped?: number }> {
+  const url = env.CUSTOM_BACKEND_URL?.trim();
+  if (!url) return { ok: true, message: 'not requested (CUSTOM_BACKEND_URL not set) — run the backend ingest:apply-mapping' };
+  return requestIngestMapping({ PEPPY_BE_URL: url.replace(/\/+$/, ''), SCRAPER_API_KEY: env.CUSTOM_BACKEND_API_KEY ?? '' });
+}
+
 const defaultPush = (bundles: BundledProduct[], target: CustomDbTarget) =>
-  withCustomProductsCollection(target, collection => pushToDatabase(bundles, {
-    collection,
-    // Category/variant mapping is the backend's job; the custom scraper never calls an external service
-    requestMapping: async () => ({ ok: true, message: 'not requested by the custom scraper' }),
-  }));
+  withCustomProductsCollection(target, collection => pushToDatabase(bundles, { collection, requestMapping: () => requestCustomMapping() }));
 
 export const defaultRunDeps: Omit<RunDeps, 'fetcher'> = {
   adapters: ADAPTERS,
   bundle: bundleProducts,
   push: defaultPush,
+  replaceStoredImages: (mapping, target) => withCustomProductsCollection(target, col => replaceStoredImageUrls(col, mapping)),
   now: () => new Date(),
 };
 
@@ -141,6 +155,13 @@ async function scrapeCategory(
         rejected.push({ site, category: target.key, url, reasons: [`HTTP ${page.status}`] });
         continue;
       }
+      // A discontinued product often redirects to another product or a category page: its data
+      // must not be stored under this URL
+      if (!samePage(page.url, url)) {
+        report.rejected++;
+        rejected.push({ site, category: target.key, url, reasons: [`redirected to ${page.url}`] });
+        continue;
+      }
       accept(adapter.extract(page.body, url), url);
     } catch (e: any) {
       if (e instanceof SiteBlockedError) throw e;
@@ -185,6 +206,8 @@ export async function runCustomScrape(config: CustomScraperConfig, opts: RunOpti
       report.valid = siteItems.length;
       report.rejected = rejected.filter(r => r.site === site).length;
       report.coverage = coverage(siteItems.map(i => i.product));
+      // A stop noticed inside a category also ends the site as stopped, not as partial/complete
+      if (report.status === 'complete' && opts.shouldStop()) { report.status = 'stopped'; report.reason = 'stop signal'; }
       if (report.status === 'complete') {
         const short = report.categories.some(c => c.valid < c.wanted);
         report.status = report.valid === 0 ? 'failed' : short ? 'partial' : 'complete';
@@ -202,10 +225,21 @@ export async function runCustomScrape(config: CustomScraperConfig, opts: RunOpti
     requests: { http: fetcher.requests ?? 0, browserRenders: fetcher.renders ?? 0 },
     outputFile,
   };
+  const save = () => fs.writeFileSync(outputFile, JSON.stringify({ ...result, products: items, rejected }, null, 2));
+  // Saved before any database work, so a failed push never loses what was scraped
+  save();
 
   if (opts.push && items.length) {
     if (opts.ai) {
       try { await initVectorTagger(); } catch (e: any) { console.warn(`[custom] AI tagging unavailable — base tags only: ${e.message}`); }
+    }
+    if (opts.s3) {
+      console.log(`\n[custom:s3] Re-hosting images of ${items.length} products on S3...`);
+      for (const it of items) {
+        it.product.imageUrls = await opts.s3.rehostAll(it.product.imageUrls);
+        it.product.imageUrl = it.product.imageUrls[0] ?? null;
+      }
+      console.log(`[custom:s3] ${opts.s3.stats.uploaded} uploaded, ${opts.s3.stats.alreadyOwn} already on S3, ${opts.s3.stats.failed} failed (kept retailer URL)`);
     }
     // Bundle per taxonomy slot so the bundler's category tags apply; cross-retailer matches merge here
     const groups = new Map<string, ScrapedItem[]>();
@@ -222,8 +256,14 @@ export async function runCustomScrape(config: CustomScraperConfig, opts: RunOpti
     console.log(`\n[custom] Pushing ${items.length} products as ${bundles.length} bundles → ${target}`);
     const pushed = await d.push(bundles, opts.push);
     result.push = { ...pushed, target, bundles: bundles.length };
+    if (opts.s3) {
+      // Existing documents keep their stored images on merge — swap the retailer URLs re-hosted this run
+      const swapped = opts.s3.mapping.size ? await d.replaceStoredImages(opts.s3.mapping, opts.push) : { documents: 0, images: 0, conflicts: 0 };
+      if (swapped.documents) console.log(`[custom:s3] ${swapped.images} stored image URL(s) on ${swapped.documents} existing document(s) switched to S3`);
+      result.s3 = { ...opts.s3.stats, storedDocumentsUpdated: swapped.documents, storedImagesReplaced: swapped.images };
+    }
   }
 
-  fs.writeFileSync(outputFile, JSON.stringify({ ...result, products: items, rejected }, null, 2));
+  save();
   return result;
 }

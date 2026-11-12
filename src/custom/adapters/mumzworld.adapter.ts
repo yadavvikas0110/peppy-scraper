@@ -32,9 +32,11 @@ export const mumzworldAdapter: PlatformAdapter = {
 
   extract(html, url) {
     const product = extractHtmlProduct(html, url, parseMumzworld);
-    // Magento GraphQL cache: price_range.minimum_price.{regular_price,final_price}; the pair whose
-    // final price equals this product's JSON-LD price is this product's own
-    product.originalPrice = findOriginalPrice(html, product.price, { regularKey: 'regular_price', finalKey: 'final_price', maxGap: 200 });
+    // Magento GraphQL cache: price_range.minimum_price.{regular_price,final_price}, about 1 KB before
+    // this product's own sku in the payload — anchored on the sku so related products never count
+    product.originalPrice = product.sku
+      ? findOriginalPrice(html, product.price, { regularKey: 'regular_price', finalKey: 'final_price', anchor: product.sku, maxGap: 200 })
+      : null;
     return product;
   },
 };

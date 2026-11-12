@@ -24,6 +24,7 @@ import { requireScraperApiKey, isApiKeyEnforced } from './utils/api-key';
 import { siteSupport, UnsupportedSitesError } from './config/transport-policy';
 import { withGroceryObs } from './grocery/grocery-obs';
 import { QUERIES } from '../scrape-master';
+import { customConfig, customStatus, stopCustomRun, triggerCustomRun } from './custom/custom.control';
 
 interceptConsole();
 
@@ -239,8 +240,25 @@ app.get('/api/config', (_req, res) => {
         queries: shoppingQueries,
         note: 'Separate long-running worker process (status-only; managed via PM2/systemd).',
       },
+      custom: customConfig(),
     },
   });
+});
+
+// ─── Custom scraper (own transport, no third party) ───────────────────────────
+// Runs as a child process with its own lock/stop signal, so it never blocks or is blocked by
+// the Bright Data pipelines. Body: { sites?: string[], categories?: string[], limit?: number, push?: boolean }
+app.get('/api/custom/status', (_req, res) => {
+  res.json(customStatus());
+});
+
+app.post('/api/custom/trigger', (req, res) => {
+  // Same contract as the other triggers: 200 with triggered:false + reason, which the admin panel shows
+  res.json(triggerCustomRun(req.body ?? {}));
+});
+
+app.post('/api/custom/stop', (_req, res) => {
+  res.json(stopCustomRun());
 });
 
 app.post('/api/trigger', (_req, res) => {

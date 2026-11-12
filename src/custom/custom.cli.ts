@@ -9,8 +9,9 @@
  *   npm run custom:scrape:push                            # scrape + write to CUSTOM_MONGODB_URI (allowlisted DB)
  *   npm run custom:stop                                   # ask a running scrape to stop
  *
- * Flags: --site a,b  --category k1,k2  --limit N  --push  --ai (OpenAI tags/embeddings on push)
- * Env (.env.custom): CUSTOM_MONGODB_URI, CUSTOM_MONGODB_DB, CUSTOM_DB_ALLOWLIST, CUSTOM_SCRAPER_ENABLED
+ * Flags: --site a,b  --category k1,k2  --limit N  --push  --no-s3  --ai (OpenAI tags/embeddings on push)
+ * Env (.env.custom): CUSTOM_MONGODB_URI, CUSTOM_MONGODB_DB, CUSTOM_DB_ALLOWLIST, CUSTOM_SCRAPER_ENABLED,
+ *                    S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET, S3_REGION, CDN_URL (required for --push)
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -36,18 +37,40 @@ const OUTPUT_DIR = path.join(process.cwd(), 'output', 'custom');
 export const CUSTOM_LOCK_FILE = path.join(process.cwd(), 'output', 'cron.custom.lock');
 export const CUSTOM_STOP_FILE = path.join(process.cwd(), 'output', 'stop.custom.signal');
 
+let ownsLock = false;
+
+function lockHolderAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === 'EPERM'; } // EPERM: alive, other user
+}
+
 function acquireCustomLock(): boolean {
   fs.mkdirSync(path.dirname(CUSTOM_LOCK_FILE), { recursive: true });
-  if (fs.existsSync(CUSTOM_LOCK_FILE)) {
+  const body = JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), mode: 'custom' });
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const lock = JSON.parse(fs.readFileSync(CUSTOM_LOCK_FILE, 'utf8'));
-      process.kill(lock.pid, 0);
-      console.error(`[custom] Already running (PID ${lock.pid}, since ${lock.startedAt}).`);
-      return false;
-    } catch { console.warn('[custom] Stale lock — previous run exited without cleanup. Proceeding.'); }
+      fs.writeFileSync(CUSTOM_LOCK_FILE, body, { flag: 'wx' }); // atomic: fails if the file exists
+      ownsLock = true;
+      return true;
+    } catch (e: any) {
+      if (e?.code !== 'EEXIST') throw e;
+      let lock: any = null;
+      try { lock = JSON.parse(fs.readFileSync(CUSTOM_LOCK_FILE, 'utf8')); } catch {}
+      if (lock?.pid && lockHolderAlive(lock.pid)) {
+        console.error(`[custom] Already running (PID ${lock.pid}, since ${lock.startedAt}).`);
+        return false;
+      }
+      console.warn('[custom] Stale lock — previous run exited without cleanup. Proceeding.');
+      try { fs.unlinkSync(CUSTOM_LOCK_FILE); } catch {}
+    }
   }
-  fs.writeFileSync(CUSTOM_LOCK_FILE, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), mode: 'custom' }));
-  return true;
+  return false;
+}
+
+/** Removes the lock only if this process created it — never another run's. */
+function releaseCustomLock(): void {
+  if (!ownsLock) return;
+  try { fs.unlinkSync(CUSTOM_LOCK_FILE); } catch {}
+  ownsLock = false;
 }
 
 async function main(): Promise<number> {
@@ -74,6 +97,21 @@ async function main(): Promise<number> {
   const push = flag('push') ? customDbTarget() : undefined;
   if (push) console.log(`[custom] Push target: ${describeTarget(push)}`);
 
+  // Images go to our S3/CDN before they are stored. Pushing retailer-hosted images needs an explicit --no-s3.
+  let s3: import('./core/images-s3').ImageRehoster | undefined;
+  if (push && !flag('no-s3')) {
+    const { isS3Configured, isOwnS3Url, uploadImageFromUrl } = require('../utils/s3.util') as typeof import('../utils/s3.util');
+    if (!isS3Configured()) {
+      console.error('[custom] S3 is not configured: set S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET, S3_REGION and CDN_URL in .env.custom (or pass --no-s3 to store retailer image URLs).');
+      return 2;
+    }
+    const { ImageRehoster } = require('./core/images-s3') as typeof import('./core/images-s3');
+    s3 = new ImageRehoster((url, folder) => uploadImageFromUrl(url, { folder }), isOwnS3Url);
+    console.log(`[custom] Images → S3 bucket ${process.env.S3_BUCKET}${process.env.CDN_URL ? ` (served via ${process.env.CDN_URL})` : ''}`);
+  } else if (push) {
+    console.warn('[custom] --no-s3: storing retailer-hosted image URLs.');
+  }
+
   if (!acquireCustomLock()) return 1;
   try { fs.unlinkSync(CUSTOM_STOP_FILE); } catch {}
   try {
@@ -82,6 +120,7 @@ async function main(): Promise<number> {
       categoryKeys: value('category')?.split(',').map(s => s.trim()).filter(Boolean),
       limit,
       push,
+      s3,
       ai: flag('ai'),
       outputDir: OUTPUT_DIR,
       shouldStop: () => fs.existsSync(CUSTOM_STOP_FILE),
@@ -98,16 +137,22 @@ async function main(): Promise<number> {
       const p = result.push;
       console.log(`push → ${p.target}: ${p.bundles} bundles, ${p.mongoInserted} inserted, ${p.mongoUpdated} updated, ${p.matchedExisting} merged into existing, ${p.skipped} skipped${p.errors.length ? `, errors: ${p.errors.join('; ')}` : ''}`);
     }
+    if (result.s3) {
+      const s = result.s3;
+      console.log(`s3 → ${s.uploaded} uploaded, ${s.alreadyOwn} already on S3, ${s.failed} failed (kept retailer URL); ${s.storedImagesReplaced} stored URL(s) switched on ${s.storedDocumentsUpdated} existing document(s)`);
+    }
     console.log(`output: ${result.outputFile}`);
-    return result.sites.every(s => s.status === 'complete' || s.status === 'partial') ? 0 : 1;
+    const sitesOk = result.sites.every(s => s.status === 'complete' || s.status === 'partial');
+    const pushOk = !result.push || result.push.errors.length === 0;
+    return sitesOk && pushOk ? 0 : 1;
   } finally {
-    try { fs.unlinkSync(CUSTOM_LOCK_FILE); } catch {}
+    releaseCustomLock();
   }
 }
 
 main().then(code => process.exit(code)).catch(e => {
   const { redactMongoUri } = require('../shared/db/mongo');
   console.error(`[custom] Fatal: ${redactMongoUri(String(e?.message ?? e))}`);
-  try { fs.unlinkSync(CUSTOM_LOCK_FILE); } catch {}
+  releaseCustomLock();
   process.exit(1);
 });

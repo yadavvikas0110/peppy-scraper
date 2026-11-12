@@ -194,8 +194,11 @@ export function buildOffer(site: SiteKey, data: ProductData): RetailerOffer {
     externalId: marketplaceIdFor(site, data.productUrl),
     canonicalUrl: canonicalProductUrl(data.productUrl),
     observedAt: data.scrapedAt ?? null,
-    // Only a regular price above what the customer pays is a discount (key absent otherwise)
-    ...(data.originalPrice != null && data.price != null && data.originalPrice > data.price ? { originalPrice: data.originalPrice } : {}),
+    // Only a regular price above what the customer pays is a discount. A parser that reports the
+    // field (custom scraper) sends null for "no discount seen" so a stale stored value is cleared;
+    // parsers that never report it leave the key absent (stored value untouched, as before).
+    ...(data.originalPrice === undefined ? {}
+      : { originalPrice: data.originalPrice != null && data.price != null && data.originalPrice > data.price ? data.originalPrice : null }),
   };
 }
 

@@ -23,6 +23,12 @@ export class LocalBrowser {
     const context = await browser.newContext({ userAgent: this.userAgent, locale: 'en-US' });
     try {
       const page = await context.newPage();
+      // Product links need the DOM only: skip images, fonts and media so a render costs the site
+      // a fraction of a real visit (those requests would also bypass our per-host rate limit)
+      await page.route('**/*', route => {
+        const type = route.request().resourceType();
+        return type === 'image' || type === 'font' || type === 'media' ? route.abort() : route.continue();
+      });
       this.renders++;
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
       await page.waitForTimeout(waitMs);

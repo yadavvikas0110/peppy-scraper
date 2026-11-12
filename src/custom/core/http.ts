@@ -85,8 +85,9 @@ export class HttpFetcher {
           const res = await this.fetchFn(`${origin}/robots.txt`, {
             headers: this.headers('text/plain,*/*'), redirect: 'follow', signal: AbortSignal.timeout(this.opts.timeoutMs),
           });
-          if (res.status >= 400 && res.status < 500) return ALLOW_ALL;
-          if (res.status >= 500) return { allow: [], disallow: ['/'] };
+          // 429 = the site is throttling us: treat like unreachable (disallow), not like "no robots.txt"
+          if (res.status === 429 || res.status >= 500) return { allow: [], disallow: ['/'] };
+          if (res.status >= 400) return ALLOW_ALL;
           return parseRobots(await res.text());
         } catch (e: any) {
           console.warn(`[custom] robots.txt for ${origin} unreachable (${e.message}) — treating the site as disallowed`);
@@ -105,10 +106,15 @@ export class HttpFetcher {
     if (!isAllowed(rules, u.pathname + u.search)) throw new RobotsDisallowedError(url);
   }
 
+  /** Consecutive 403 answers per host; a run of them means the site is refusing us. */
+  private forbiddenStreak = new Map<string, number>();
+  static readonly FORBIDDEN_STREAK_LIMIT = 3;
+
   async get(url: string, accept = 'text/html,application/xhtml+xml,*/*;q=0.8'): Promise<FetchResult> {
     await this.assertAllowed(url);
     const host = new URL(url).host;
     let lastErr: Error = new Error('unknown');
+    let lastStatus = 0;
 
     for (let attempt = 0; attempt <= this.opts.maxRetries; attempt++) {
       await this.limiter.wait(host);
@@ -118,18 +124,40 @@ export class HttpFetcher {
           headers: this.headers(accept), redirect: 'follow', signal: AbortSignal.timeout(this.opts.timeoutMs),
         });
         const body = await res.text();
+        lastStatus = res.status;
         if (isBlockPage(body)) throw new SiteBlockedError(host, `anti-bot page (HTTP ${res.status})`);
         if (res.status === 429 || res.status >= 500) {
           lastErr = new Error(`HTTP ${res.status} for ${url}`);
         } else {
-          return { url: res.url || url, status: res.status, body };
+          if (res.status === 403) {
+            const streak = (this.forbiddenStreak.get(host) ?? 0) + 1;
+            this.forbiddenStreak.set(host, streak);
+            if (streak >= HttpFetcher.FORBIDDEN_STREAK_LIMIT) throw new SiteBlockedError(host, `${streak} consecutive HTTP 403 responses`);
+          } else {
+            this.forbiddenStreak.set(host, 0);
+          }
+          const finalUrl = res.url || url;
+          // A redirect may land on a path robots.txt disallows — that page is not used
+          if (finalUrl !== url) await this.assertAllowed(finalUrl);
+          return { url: finalUrl, status: res.status, body };
         }
       } catch (e: any) {
-        if (e instanceof SiteBlockedError) throw e;
+        if (e instanceof SiteBlockedError || e instanceof RobotsDisallowedError) throw e;
         lastErr = e;
       }
       if (attempt < this.opts.maxRetries) await this.sleep(2000 * 2 ** attempt);
     }
+    // Still rate-limited after backing off: the site is throttling us — stop it for this run
+    if (lastStatus === 429) throw new SiteBlockedError(host, 'HTTP 429 (rate limited) after retries');
     throw lastErr;
   }
+}
+
+/** Same page, ignoring scheme, host prefix "www.", trailing slash and case — used to detect redirects to other products. */
+export function samePage(a: string, b: string): boolean {
+  const norm = (u: string) => {
+    const x = new URL(u);
+    return `${x.hostname.replace(/^www\./, '')}${x.pathname.replace(/\/+$/, '')}`.toLowerCase();
+  };
+  try { return norm(a) === norm(b); } catch { return false; }
 }

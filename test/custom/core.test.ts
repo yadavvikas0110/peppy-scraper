@@ -73,6 +73,34 @@ describe('HTTP fetcher', () => {
     assert.equal(calls, 2);
   });
 
+  test('consecutive 403s stop the site; a 200 in between resets the streak', async () => {
+    const statuses = [403, 200, 403, 403, 403];
+    let i = 0;
+    const f = new HttpFetcher(opts, async (u: string) => u.endsWith('/robots.txt') ? res(404, '') : res(statuses[i++], '<title>x</title>'), noSleep);
+    assert.equal((await f.get('https://x.com/1')).status, 403);
+    assert.equal((await f.get('https://x.com/2')).status, 200);
+    assert.equal((await f.get('https://x.com/3')).status, 403);
+    assert.equal((await f.get('https://x.com/4')).status, 403);
+    await assert.rejects(f.get('https://x.com/5'), SiteBlockedError);
+  });
+
+  test('still 429 after retries stops the site', async () => {
+    const f = new HttpFetcher(opts, async (u: string) => u.endsWith('/robots.txt') ? res(404, '') : res(429, ''), noSleep);
+    await assert.rejects(f.get('https://x.com/p'), (e: any) => e instanceof SiteBlockedError && /429/.test(e.message));
+  });
+
+  test('a redirect onto a robots-disallowed path is refused', async () => {
+    const f = new HttpFetcher(opts, async (u: string) => u.endsWith('/robots.txt')
+      ? res(200, 'User-agent: *\nDisallow: /search/')
+      : ({ status: 200, url: 'https://x.com/search/?q=a', text: async () => 'ok' } as unknown as Response), noSleep);
+    await assert.rejects(f.get('https://x.com/old-product'), RobotsDisallowedError);
+  });
+
+  test('robots.txt answering 429 means disallowed', async () => {
+    const f = new HttpFetcher(opts, async (u: string) => u.endsWith('/robots.txt') ? res(429, '') : res(200, 'x'), noSleep);
+    await assert.rejects(f.get('https://x.com/a'), RobotsDisallowedError);
+  });
+
   test('block page detection', () => {
     assert.equal(isBlockPage('<title>Just a moment...</title>'), true);
     assert.equal(isBlockPage('<title>Buy shoes | Namshi</title>'), false);
@@ -94,6 +122,16 @@ describe('normalizers', () => {
   test('names lose SEO decoration', () => {
     assert.equal(cleanName('Asics Patriot 14 for Men | Best Price UAE'), 'Asics Patriot 14 for Men');
     assert.equal(cleanName('Buy Ella&#x27;s Kitchen Pie 130g in UAE | Mumzworld'), "Ella's Kitchen Pie 130g");
+    assert.equal(cleanName('Apple iPhone 16 Pro Max | FREE DELIVERY | 1 Year Warranty'), 'Apple iPhone 16 Pro Max');
+    assert.equal(cleanName('Apple iPhone 16 | FREE EXPRESS DELIVERY'), 'Apple iPhone 16');
+  });
+  test('variant segments after "|" are kept, so colours never merge', () => {
+    assert.equal(cleanName('Apple iPhone 15 Pro Max 256GB | Natural Titanium'), 'Apple iPhone 15 Pro Max 256GB | Natural Titanium');
+    assert.equal(cleanName('Ring in Uaebrand Edition'), 'Ring in Uaebrand Edition');
+  });
+  test('negative amounts are not prices', () => {
+    assert.equal(toPrice('-5'), null);
+    assert.equal(toPrice('AED -12.50'), null);
   });
 });
 
@@ -120,6 +158,10 @@ describe('JSON-LD extraction', () => {
     assert.equal(p.brand, 'Guess');
     assert.equal(p.inStock, false);
     assert.equal(p.price, 450);
+  });
+  test('ratings are normalised to 0–5 (bestRating), unknown larger scales dropped', () => {
+    assert.equal(extractJsonLdProduct(PRODUCT_LD({ aggregateRating: { ratingValue: '9', bestRating: '10', reviewCount: '4' } })).ratings, 4.5);
+    assert.equal(extractJsonLdProduct(PRODUCT_LD({ aggregateRating: { ratingValue: '87', reviewCount: '4' } })).ratings, null);
   });
   test('no Product block → empty', () => {
     assert.deepEqual(extractJsonLdProduct('<script type="application/ld+json">{"@type":"Organization"}</script>'), {});

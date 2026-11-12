@@ -52,7 +52,11 @@ export function extractJsonLdProduct(html: string): Partial<CustomProduct> {
   const offer = firstOffer(product.offers);
   const price = toPrice(offer?.price ?? offer?.lowPrice);
   const rating = product.aggregateRating;
-  const ratingValue = rating?.ratingValue != null ? parseFloat(String(rating.ratingValue)) : NaN;
+  // Normalise to a 0–5 scale (the backend schema has rating max 5); unknown scales above 5 are dropped
+  const best = parseFloat(String(rating?.bestRating ?? '5')) || 5;
+  const rawRating = rating?.ratingValue != null ? parseFloat(String(rating.ratingValue)) : NaN;
+  const scaled = best > 0 && best !== 5 ? Math.round((rawRating / best) * 5 * 100) / 100 : rawRating;
+  const ratingValue = scaled <= 5 ? scaled : NaN;
   const reviewCount = parseInt(String(rating?.reviewCount ?? rating?.ratingCount ?? ''), 10);
   const brand = typeof product.brand === 'string' ? product.brand : product.brand?.name;
   const category = Array.isArray(product.category) ? product.category[0] : product.category;

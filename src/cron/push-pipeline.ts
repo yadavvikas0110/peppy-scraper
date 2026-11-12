@@ -162,8 +162,8 @@ export interface MongoRetailerOffer {
   /** When the offer was observed on the retailer's site — never the time of the push */
   lastSeenAt?: Date;
   isStale?: boolean;
-  /** Regular price above `price` when the retailer shows a discount */
-  originalPrice?: number;
+  /** Regular price above `price` when the retailer shows a discount; null = observed without one (clears a stored value) */
+  originalPrice?: number | null;
 }
 
 export interface MongoProduct {
@@ -209,7 +209,8 @@ export function toMongoOffer(r: RetailerOffer): MongoRetailerOffer | null {
     externalId:   r.externalId ?? marketplaceIdFor(r.retailerId, r.productUrl) ?? undefined,
     canonicalUrl: r.canonicalUrl ?? canonicalProductUrl(r.productUrl) ?? undefined,
     lastSeenAt:   toDate(r.observedAt),
-    originalPrice: hasPrice && typeof r.originalPrice === 'number' && r.originalPrice > r.price! ? r.originalPrice : undefined,
+    originalPrice: hasPrice && typeof r.originalPrice === 'number' && r.originalPrice > r.price! ? r.originalPrice
+      : r.originalPrice === undefined ? undefined : null,
   });
 }
 
@@ -310,13 +311,18 @@ export function mergeOffer(existing: any | undefined, incoming: MongoRetailerOff
   }
 
   const keepAffiliateUrl = existing?.productUrl && isAffiliateUrl(existing.productUrl) && sameListing(existing, incoming);
-  return dropUndefined({
+  const merged = dropUndefined({
     ...existing,
     ...incoming,
     productUrl: keepAffiliateUrl ? existing.productUrl : incoming.productUrl ?? existing?.productUrl,
     isStale: false,
     lastSeenAt: incoming.lastSeenAt ?? existing?.lastSeenAt,
   });
+  // A kept original price that is not above the new price is no longer a discount
+  if (typeof merged.originalPrice === 'number' && typeof merged.price === 'number' && merged.originalPrice <= merged.price) {
+    delete merged.originalPrice;
+  }
+  return merged;
 }
 
 /**

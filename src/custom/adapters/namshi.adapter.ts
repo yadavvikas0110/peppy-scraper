@@ -27,7 +27,9 @@ export const namshiAdapter: PlatformAdapter = {
     const urls: string[] = [];
     for (let page = 1; page <= MAX_LISTING_PAGES && urls.length < want; page++) {
       const listing = `${ORIGIN}${target.source}${page > 1 ? `?page=${page}` : ''}`;
-      const { body } = await fetcher.get(listing);
+      const { status, body } = await fetcher.get(listing);
+      if (status === 404) throw new Error(`category page not found (404): ${listing}`);
+      if (status !== 200) break;
       const before = urls.length;
       for (const u of parseNamshiSearch(body, listing)) if (!urls.includes(u)) urls.push(u);
       if (urls.length === before) break; // no new products — last page
