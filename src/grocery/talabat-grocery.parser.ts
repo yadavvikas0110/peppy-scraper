@@ -72,7 +72,9 @@ function readItems(state: Record<string, any>, warnings: string[]): TalabatGroce
       discountPercentage: typeof r.discountPercentage === 'number' ? r.discountPercentage : undefined,
       image,
       images,
-      stockAmount: toStock(r.stockAmount),
+      // Talabat sent a stock count (`stockAmount`) until early Nov 2026; it now sends a boolean
+      // `inStock`. Same mapping as the Deliveroo parser: boolean → 1/0, nothing known → null.
+      stockAmount: toStock(r.stockAmount) ?? (typeof r.inStock === 'boolean' ? (r.inStock ? 1 : 0) : null),
     });
   });
 

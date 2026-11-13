@@ -7,3 +7,5 @@ output/
 
 # local development overrides (point at the dev database, never committed)
 .env.dev
+.env.benchmark
+.env.custom
