@@ -139,7 +139,7 @@ async function main(): Promise<number> {
     }
     if (result.s3) {
       const s = result.s3;
-      console.log(`s3 → ${s.uploaded} uploaded, ${s.alreadyOwn} already on S3, ${s.failed} failed (kept retailer URL); ${s.storedImagesReplaced} stored URL(s) switched on ${s.storedDocumentsUpdated} existing document(s)`);
+      console.log(`s3 → ${s.uploaded} uploaded, ${s.alreadyOwn} already on S3, ${s.failed} failed (dropped); ${s.storedImagesReplaced} stored URL(s) switched, ${s.storedImagesDropped ?? 0} dead one(s) removed, on ${s.storedDocumentsUpdated} existing document(s)`);
     }
     console.log(`output: ${result.outputFile}`);
     const sitesOk = result.sites.every(s => s.status === 'complete' || s.status === 'partial');

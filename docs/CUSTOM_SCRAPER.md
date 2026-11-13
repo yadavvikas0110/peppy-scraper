@@ -59,8 +59,12 @@ Saving is refused with a clear reason until S3 and the database are configured o
 
 ```bash
 npm run custom:images:s3:dry-run      # count (dev today: 1,249 documents, 5,445 images)
-npm run custom:images:s3              # migrate; failed uploads keep the retailer URL — re-run to retry
+npm run custom:images:s3              # migrate; re-run to retry temporary failures
 ```
+
+**When an image upload fails** (same policy as the dining pipeline: we never store a retailer image URL):
+- **Scrape & save:** the image is dropped and the next run retries it. A product left with no image is not saved; it is listed as rejected ("no image could be uploaded to S3").
+- **Stored documents (backfill and the post-push swap):** a retailer URL is removed only when it is dead (404/410, or the link does not return an image). Temporary failures (timeouts, 5xx, 403 blocks) keep the URL so the next run can retry; a removed image would not come back on a later scrape, because a merge keeps a document's stored images. A gallery is never emptied.
 
 It **never** reads the shared `MONGODB_URI`. It writes only to a database named in `CUSTOM_DB_ALLOWLIST`.
 The production pipeline's database name `peppy` is refused unless you explicitly allowlist it, and

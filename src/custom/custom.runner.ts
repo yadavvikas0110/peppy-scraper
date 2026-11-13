@@ -46,7 +46,7 @@ export interface CustomRunResult {
   outputFile: string;
   push?: PushResult & { target: string; bundles: number };
   /** Image re-hosting on our S3/CDN (only with push + S3) */
-  s3?: RehostStats & { storedDocumentsUpdated: number; storedImagesReplaced: number };
+  s3?: RehostStats & { storedDocumentsUpdated: number; storedImagesReplaced: number; storedImagesDropped: number };
 }
 
 export interface RunOptions {
@@ -68,7 +68,7 @@ export interface RunDeps {
   fetcher?: CustomFetcher & { requests?: number; renders?: number; close?: () => Promise<void> };
   bundle: typeof bundleProducts;
   push: (bundles: BundledProduct[], target: CustomDbTarget) => Promise<PushResult>;
-  replaceStoredImages: (mapping: Map<string, string>, target: CustomDbTarget) => Promise<{ documents: number; images: number; conflicts: number }>;
+  replaceStoredImages: (mapping: Map<string, string>, target: CustomDbTarget, drop?: Set<string>) => Promise<{ documents: number; images: number; conflicts: number; dropped: number; keptLastImage: number }>;
   now: () => Date;
 }
 
@@ -90,7 +90,7 @@ export const defaultRunDeps: Omit<RunDeps, 'fetcher'> = {
   adapters: ADAPTERS,
   bundle: bundleProducts,
   push: defaultPush,
-  replaceStoredImages: (mapping, target) => withCustomProductsCollection(target, col => replaceStoredImageUrls(col, mapping)),
+  replaceStoredImages: (mapping, target, drop) => withCustomProductsCollection(target, col => replaceStoredImageUrls(col, mapping, new Date(), drop)),
   now: () => new Date(),
 };
 
@@ -239,7 +239,21 @@ export async function runCustomScrape(config: CustomScraperConfig, opts: RunOpti
         it.product.imageUrls = await opts.s3.rehostAll(it.product.imageUrls);
         it.product.imageUrl = it.product.imageUrls[0] ?? null;
       }
-      console.log(`[custom:s3] ${opts.s3.stats.uploaded} uploaded, ${opts.s3.stats.alreadyOwn} already on S3, ${opts.s3.stats.failed} failed (kept retailer URL)`);
+      // Like dining: failed images are dropped. A product left without any image is not saved.
+      const noImage = items.filter(it => !it.product.imageUrls.length);
+      for (const it of noImage) {
+        rejected.push({ site: it.site, category: it.category, url: it.product.productUrl ?? "", reasons: ["no image could be uploaded to S3 (retried next run)"] });
+        const s = result.sites.find(x => x.site === it.site);
+        if (s) { s.valid--; s.rejected++; }
+      }
+      for (let i = items.length - 1; i >= 0; i--) if (!items[i].product.imageUrls.length) items.splice(i, 1);
+      console.log(`[custom:s3] ${opts.s3.stats.uploaded} uploaded, ${opts.s3.stats.alreadyOwn} already on S3, ${opts.s3.stats.failed} failed (dropped)${noImage.length ? `; ${noImage.length} product(s) skipped — no image left` : ''}`);
+    }
+    if (!items.length) {
+      console.log('[custom:s3] Nothing to push — no product kept an image.');
+      result.s3 = { ...opts.s3!.stats, storedDocumentsUpdated: 0, storedImagesReplaced: 0, storedImagesDropped: 0 };
+      save();
+      return result;
     }
     // Bundle per taxonomy slot so the bundler's category tags apply; cross-retailer matches merge here
     const groups = new Map<string, ScrapedItem[]>();
@@ -258,9 +272,11 @@ export async function runCustomScrape(config: CustomScraperConfig, opts: RunOpti
     result.push = { ...pushed, target, bundles: bundles.length };
     if (opts.s3) {
       // Existing documents keep their stored images on merge — swap the retailer URLs re-hosted this run
-      const swapped = opts.s3.mapping.size ? await d.replaceStoredImages(opts.s3.mapping, opts.push) : { documents: 0, images: 0, conflicts: 0 };
-      if (swapped.documents) console.log(`[custom:s3] ${swapped.images} stored image URL(s) on ${swapped.documents} existing document(s) switched to S3`);
-      result.s3 = { ...opts.s3.stats, storedDocumentsUpdated: swapped.documents, storedImagesReplaced: swapped.images };
+      const none = { documents: 0, images: 0, conflicts: 0, dropped: 0, keptLastImage: 0 };
+      const swapped = opts.s3.mapping.size || opts.s3.permanentFailures.size
+        ? await d.replaceStoredImages(opts.s3.mapping, opts.push, opts.s3.permanentFailures) : none;
+      if (swapped.documents) console.log(`[custom:s3] ${swapped.images} stored image URL(s) switched to S3, ${swapped.dropped} dead one(s) removed, on ${swapped.documents} existing document(s)`);
+      result.s3 = { ...opts.s3.stats, storedDocumentsUpdated: swapped.documents, storedImagesReplaced: swapped.images, storedImagesDropped: swapped.dropped };
     }
   }
 

@@ -15,19 +15,61 @@ const CDN = 'https://cdn.peppy.test';
 const isOwn = (u: string) => u.startsWith(`${CDN}/`);
 
 describe('S3 image re-hosting', () => {
-  test('uploads each URL once, keeps own URLs, keeps the retailer URL on failure', async () => {
+  test('uploads each URL once, keeps own URLs, drops failed images (like dining)', async () => {
     const calls: Array<[string, string]> = [];
     const r = new ImageRehoster(async (u, folder) => {
       calls.push([u, folder]);
-      if (u.includes('broken')) throw new Error('403');
+      if (u.includes('blocked')) throw Object.assign(new Error('403'), { response: { status: 403 } });
+      if (u.includes('gone')) throw Object.assign(new Error('404'), { response: { status: 404 } });
+      if (u.includes('html')) throw new Error('Not an image (content-type "text/html"): x');
       return `${CDN}/${folder}/${path.basename(u)}`;
     }, isOwn, 2, { warn: () => {} });
-    const out = await r.rehostAll(['https://x.com/a.jpg', 'https://x.com/a.jpg', `${CDN}/products/images/old.jpg`, 'https://x.com/broken.jpg']);
-    assert.deepEqual(out, [`${CDN}/products/images/a.jpg`, `${CDN}/products/images/a.jpg`, `${CDN}/products/images/old.jpg`, 'https://x.com/broken.jpg']);
-    assert.deepEqual(calls.map(c => c[0]), ['https://x.com/a.jpg', 'https://x.com/broken.jpg']);
+    const out = await r.rehostAll(['https://x.com/a.jpg', 'https://x.com/a.jpg', `${CDN}/products/images/old.jpg`, 'https://x.com/blocked.jpg', 'https://x.com/gone.jpg', 'https://x.com/html.jpg']);
+    assert.deepEqual(out, [`${CDN}/products/images/a.jpg`, `${CDN}/products/images/old.jpg`]);
+    assert.equal(out.some(u => u.startsWith('https://x.com/')), false, 'no retailer URL is ever returned');
     assert.equal(calls[0][1], PRODUCT_IMAGE_FOLDER);
-    assert.deepEqual(r.stats, { uploaded: 1, reused: 1, failed: 1, alreadyOwn: 1 });
+    assert.deepEqual(r.stats, { uploaded: 1, reused: 1, failed: 3, alreadyOwn: 1 });
     assert.deepEqual([...r.mapping], [['https://x.com/a.jpg', `${CDN}/products/images/a.jpg`]]);
+    // Only failures that a retry cannot fix are permanent; a 403 block is temporary
+    assert.deepEqual([...r.permanentFailures].sort(), ['https://x.com/gone.jpg', 'https://x.com/html.jpg']);
+  });
+
+  test('stored documents: dead URLs removed, temporary ones kept, a gallery is never emptied', async () => {
+    const docs = [
+      { _id: 1, updatedAt: 'u1', images: ['https://x.com/a.jpg', 'https://x.com/dead.jpg', 'https://x.com/slow.jpg'], retailers: [{ retailerId: 'namshi', imageUrl: 'https://x.com/dead.jpg' }] },
+      { _id: 2, updatedAt: 'u2', images: ['https://x.com/dead.jpg'], retailers: [] },
+    ];
+    const updates: any[] = [];
+    const col: any = {
+      find: () => ({ toArray: async () => docs }),
+      updateOne: async (_f: any, update: any) => { updates.push(update.$set); return { matchedCount: 1, modifiedCount: 1 }; },
+    };
+    const res = await replaceStoredImageUrls(col, new Map([['https://x.com/a.jpg', `${CDN}/a.jpg`]]), new Date(), new Set(['https://x.com/dead.jpg']));
+    assert.deepEqual(res, { documents: 1, images: 1, conflicts: 0, dropped: 2, keptLastImage: 1 });
+    assert.deepEqual(updates[0].images, [`${CDN}/a.jpg`, 'https://x.com/slow.jpg']);
+    assert.equal(updates[0].retailers[0].imageUrl, `${CDN}/a.jpg`);
+    assert.equal(updates.length, 1, 'doc 2 keeps its only image');
+  });
+
+  test('a run skips a product whose every image failed to upload', async () => {
+    const page = (img: string) => `<script type="application/ld+json">{"@type":"Product","name":"Phone ${img}","sku":"${img}","image":["https://cdn.jumbo.test/${img}.jpg"],"offers":{"price":"999","priceCurrency":"AED","availability":"https://schema.org/InStock"}}</script>`;
+    const fetcher: CustomFetcher = { get: async url => ({ url, status: 200, body: page(url.includes('p2') ? 'bad' : 'ok') }), render: async () => '' };
+    const adapter: PlatformAdapter = { ...jumboAdapter, discover: async () => ({ urls: ['https://www.jumbo.ae/p1.html', 'https://www.jumbo.ae/p2.html'] }) };
+    const config = parseCustomConfig({ settings: { userAgent: 'x' }, sites: { jumbo: [{ key: 'phones', label: 'Phones', broadCategory: 'Electronics', subCategory: 'Smartphones', source: '/m.html', limit: 2 }] } });
+    const rehoster = new ImageRehoster(async u => { if (u.includes('bad')) throw new Error('timeout'); return `${CDN}/products/images/${path.basename(u)}`; }, isOwn, 2, { warn: () => {} });
+    let pushedNames: string[] = [];
+    const result = await runCustomScrape(config, {
+      sites: ['jumbo'], ai: false, outputDir: fs.mkdtempSync(path.join(os.tmpdir(), 'custom-s3-')), shouldStop: () => false,
+      push: { uri: 'mongodb://localhost/dev', dbName: 'dev' }, s3: rehoster,
+    }, {
+      adapters: { jumbo: adapter } as any, fetcher,
+      push: async b => { pushedNames = b.map((x: any) => x.name); return { mongoInserted: 1, mongoUpdated: 0, matchedExisting: 0, skipped: 0, chromaVectors: 0, mapping: { ok: true, message: '' }, errors: [] }; },
+      replaceStoredImages: async () => ({ documents: 0, images: 0, conflicts: 0, dropped: 0, keptLastImage: 0 }),
+    });
+    assert.equal(pushedNames.length, 1);
+    assert.match(pushedNames[0], /ok/);
+    assert.equal(result.sites[0].valid, 1);
+    assert.equal(result.sites[0].rejected, 1);
   });
 
   test('stored documents: only mapped URLs change, order kept, offers updated, concurrent edits skipped', async () => {
@@ -45,7 +87,7 @@ describe('S3 image re-hosting', () => {
       },
     };
     const res = await replaceStoredImageUrls(col, new Map([['https://x.com/a.jpg', `${CDN}/a.jpg`]]), new Date('2026-11-12T00:00:00Z'));
-    assert.deepEqual(res, { documents: 1, images: 2, conflicts: 1 });
+    assert.deepEqual(res, { documents: 1, images: 2, conflicts: 1, dropped: 0, keptLastImage: 0 });
     assert.deepEqual(updates[0].images, [`${CDN}/a.jpg`, 'https://x.com/keep.jpg']);
     assert.equal(updates[0].retailers[0].imageUrl, `${CDN}/a.jpg`);
   });
@@ -64,12 +106,12 @@ describe('S3 image re-hosting', () => {
     }, {
       adapters: { jumbo: adapter } as any, fetcher,
       push: async b => { pushed = b; return { mongoInserted: 1, mongoUpdated: 0, matchedExisting: 0, skipped: 0, chromaVectors: 0, mapping: { ok: true, message: '' }, errors: [] }; },
-      replaceStoredImages: async m => { swappedWith = m; return { documents: 3, images: 4, conflicts: 0 }; },
+      replaceStoredImages: async m => { swappedWith = m; return { documents: 3, images: 4, conflicts: 0, dropped: 0, keptLastImage: 0 }; },
     });
     assert.deepEqual(pushed[0].images, [`${CDN}/products/images/p1.jpg`]);
     assert.equal(pushed[0].retailers[0].imageUrl, `${CDN}/products/images/p1.jpg`);
     assert.equal(swappedWith!.get('https://cdn.jumbo.test/p1.jpg'), `${CDN}/products/images/p1.jpg`);
-    assert.deepEqual(result.s3, { uploaded: 1, reused: 0, failed: 0, alreadyOwn: 0, storedDocumentsUpdated: 3, storedImagesReplaced: 4 });
+    assert.deepEqual(result.s3, { uploaded: 1, reused: 0, failed: 0, alreadyOwn: 0, storedDocumentsUpdated: 3, storedImagesReplaced: 4, storedImagesDropped: 0 });
   });
 });
 

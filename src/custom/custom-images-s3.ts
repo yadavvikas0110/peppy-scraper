@@ -6,8 +6,9 @@
  *   npm run custom:images:s3:dry-run              # count what would move
  *   npm run custom:images:s3 -- --limit 100       # migrate (optionally the first N documents)
  *
- * Same write target and allowlist as the custom scraper. Images already on S3/CDN are skipped;
- * a failed upload keeps the retailer URL (re-run to retry). Requires S3_* and CDN_URL.
+ * Same write target and allowlist as the custom scraper. Images already on S3/CDN are skipped.
+ * Dead retailer URLs (404/410, not an image) are removed, but a gallery is never emptied;
+ * temporary failures (timeouts, 5xx, blocks) keep the URL so a re-run can retry. Requires S3_* and CDN_URL.
  */
 import { MongoClient } from 'mongodb';
 import { customDbTarget, describeTarget } from './custom.db';
@@ -51,9 +52,11 @@ async function main(): Promise<number> {
       await rehoster.rehost(u);
       if (++done % 200 === 0) console.log(`[images:s3] ${done}/${urls.size} images processed`);
     }));
-    const swapped = await replaceStoredImageUrls(col as any, rehoster.mapping);
-    console.log(`[images:s3] uploaded ${rehoster.stats.uploaded}, failed ${rehoster.stats.failed} (kept retailer URL); ${swapped.images} URL(s) switched on ${swapped.documents} document(s)${swapped.conflicts ? `, ${swapped.conflicts} skipped (edited concurrently — re-run)` : ''}`);
-    return rehoster.stats.failed ? 1 : 0;
+    const swapped = await replaceStoredImageUrls(col as any, rehoster.mapping, new Date(), rehoster.permanentFailures);
+    const temporary = rehoster.stats.failed - rehoster.permanentFailures.size;
+    console.log(`[images:s3] uploaded ${rehoster.stats.uploaded}; failed ${rehoster.stats.failed} (${rehoster.permanentFailures.size} dead, ${temporary} temporary — kept for retry)`);
+    console.log(`[images:s3] ${swapped.documents} document(s) updated: ${swapped.images} URL(s) switched to S3, ${swapped.dropped} dead URL(s) removed${swapped.keptLastImage ? `, ${swapped.keptLastImage} kept a dead URL because it was their only image` : ''}${swapped.conflicts ? `, ${swapped.conflicts} skipped (edited concurrently — re-run)` : ''}`);
+    return temporary > 0 ? 1 : 0;
   } catch (e: any) {
     console.error(`[images:s3] ${redactMongoUri(String(e?.message ?? e), target.uri)}`);
     return 1;
