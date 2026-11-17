@@ -24,6 +24,7 @@ import { initVectorTagger } from './vector-tagger.service';
 import { connectChroma, isChromaAvailable } from './chroma.service';
 import { collectShopifyProducts } from './shopify.service';
 import { shouldStop } from '../utils/stop-signal';
+import { fetchListingViaScrapeDo, scrapeDoEnabledForUrl, scrapeProductViaScrapeDo } from './scrapedo-transport';
 
 export { closeBrowserPool as closeBrowser };
 
@@ -34,7 +35,7 @@ const PRODUCT_LINK_SELECTORS = ['a[href*="/dp/"]', 'a[href*="/p/"]', 'a[data-pja
 const NO_RETRY_RE = /no_peer|probe_timeout|a2a_tun_open|a2a_exception|ERR_TUNNEL_CONNECTION_FAILED|Timeout \d+ms exceeded|Host blocked by Bright Data/i;
 
 function isNonRetryable(message: string): boolean {
-  return NO_RETRY_RE.test(message) || isAccessDeniedError(message) || isProviderAuthError(message);
+  return NO_RETRY_RE.test(message) || isAccessDeniedError(message) || isProviderAuthError(message) || /Scrape\.do account problem/.test(message);
 }
 
 // Anti-bot interstitials (Akamai, Cloudflare, captchas) — the site refused this session,
@@ -73,6 +74,8 @@ export function withoutEmbeddings(bundles: BundledProduct[]): BundledProduct[] {
 }
 
 async function fetchSearchHTML(url: string): Promise<string> {
+  // Platforms switched to Scrape.do (SCRAPE_DO_SITES) use its profiles and retry rules instead
+  if (scrapeDoEnabledForUrl(url)) return fetchListingViaScrapeDo(url);
   const hostname = new URL(url).hostname;
   const isAmazon = STATIC_SEARCH_HOSTS.test(hostname);
 
@@ -120,6 +123,8 @@ class IncompletePageError extends Error {}
 // scrapeProductBD already retries network/browser errors internally. This loop only
 // re-fetches pages that loaded but rendered incompletely, so paid attempts don't multiply.
 export async function scrapeProductWithRetry(url: string): Promise<ProductData> {
+  // Scrape.do path validates the page with our parser and escalates options itself — no re-fetch loop
+  if (scrapeDoEnabledForUrl(url)) return scrapeProductViaScrapeDo(url);
   let lastErr: Error = new Error('unknown');
   for (let attempt = 0; attempt < 3; attempt++) {
     try {

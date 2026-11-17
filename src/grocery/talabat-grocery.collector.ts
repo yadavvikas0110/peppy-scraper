@@ -1,4 +1,5 @@
 import { fetchHTMLViaUnlocker } from '../services/brightdata.service';
+import { fetchGroceryPageViaScrapeDo, scrapeDoEnabledFor } from '../services/scrapedo-transport';
 import { BundledProduct, RetailerOffer, toStockStatus } from '../parsers/types';
 import { parseTalabatGrocery } from './talabat-grocery.parser';
 import type { TalabatGroceryItem } from './talabat-grocery.types';
@@ -111,7 +112,7 @@ export async function collectTalabatGrocery(
   opts: GroceryCollectOptions = {},
 ): Promise<GroceryCollectResult> {
   const max = opts.max ?? GROCERY_DEFAULT_MAX;
-  const fetchHtml = opts.fetchHtml ?? fetchHTMLViaUnlocker;
+  const fetchHtml = opts.fetchHtml ?? (scrapeDoEnabledFor('talabat') ? fetchGroceryPageViaScrapeDo : fetchHTMLViaUnlocker);
   const logger = opts.logger ?? console;
   const observedAt = (opts.now ?? new Date()).toISOString();
 

@@ -11,6 +11,9 @@ const JUMBO_CATEGORY_SLUGS = new Set([
 // category slugs are one to three words
 const MIN_PRODUCT_SLUG_WORDS = 4;
 
+// Single-segment pages that are not products (deal hubs, deposit/advance-payment pages)
+const NON_PRODUCT_SLUGS = /^(deal-of-the-day|best-sellers?|new-arrivals?|top-deals|clearance-sale)$|^advance-for-/;
+
 export function parseJumboSearch(html: string, baseUrl: string): string[] {
   const $ = cheerio.load(html);
   const links = new Set<string>();
@@ -28,7 +31,7 @@ export function parseJumboSearch(html: string, baseUrl: string): string[] {
     if (segments.length !== 1) return;
 
     const slug = segments[0].replace(/\.html$/, '');
-    if (JUMBO_CATEGORY_SLUGS.has(slug)) return;
+    if (JUMBO_CATEGORY_SLUGS.has(slug) || NON_PRODUCT_SLUGS.test(slug)) return;
     if (slug.split('-').filter(Boolean).length < MIN_PRODUCT_SLUG_WORDS) return;
     links.add(clean);
   });
