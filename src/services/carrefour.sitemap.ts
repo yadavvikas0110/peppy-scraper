@@ -1,4 +1,5 @@
 import { fetchHTMLViaUnlocker } from './brightdata.service';
+import { fetchSitemapViaScrapeDo, scrapeDoEnabledFor } from './scrapedo-transport';
 
 const SITEMAP_BASE = 'https://www.carrefouruae.com/sitemaps';
 const SHARD_COUNT = 36; // products0_en.xml … products35_en.xml
@@ -27,7 +28,7 @@ function isAccessoryUrl(url: string): boolean {
 async function fetchShardUrls(shardIndex: number): Promise<string[]> {
   const url = `${SITEMAP_BASE}/products${shardIndex}_en.xml`;
   try {
-    const xml = await fetchHTMLViaUnlocker(url);
+    const xml = scrapeDoEnabledFor('carrefour') ? await fetchSitemapViaScrapeDo(url) : await fetchHTMLViaUnlocker(url);
     return [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1]);
   } catch {
     return [];

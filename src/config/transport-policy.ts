@@ -1,4 +1,5 @@
 import { SiteKey } from './sites';
+import { scrapeDoEnabledFor } from '../services/scrapedo-transport';
 
 /**
  * Which sites have an authorized, working data source.
@@ -17,7 +18,8 @@ export type SiteSupport = { site: SiteKey; supported: true } | { site: SiteKey; 
 export function siteSupport(site: SiteKey, env: NodeJS.ProcessEnv = process.env): SiteSupport {
   const approved = (env.BRIGHT_DATA_APPROVED_SITES || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   const reason = KNOWN_BLOCKED[site];
-  if (reason && !approved.includes(site)) return { site, supported: false, reason };
+  // A site switched to Scrape.do (SCRAPE_DO_SITES) has an authorized source regardless of Bright Data
+  if (reason && !approved.includes(site) && !scrapeDoEnabledFor(site, env)) return { site, supported: false, reason };
   return { site, supported: true };
 }
 

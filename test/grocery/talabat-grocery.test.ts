@@ -55,6 +55,13 @@ describe('parseTalabatGrocery', () => {
     assert.equal(delmonte!.stockAmount! > 0, true);
   });
 
+  test('current payload: boolean inStock (no stockAmount) still yields a stock status', () => {
+    const page = (items: unknown[]) => `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { initialState: { itemsData: { items, pageCount: 1, currentPage: 1 } } } } })}</script>`;
+    const base = { title: 'Banana 1kg', price: 8.5, image: 'https://talabat.dhmedia.io/a.jpg', sku: 'S1' };
+    const r = parseTalabatGrocery(page([{ ...base, inStock: true }, { ...base, sku: 'S2', inStock: false }, { ...base, sku: 'S3' }]), SRC_URL);
+    assert.deepEqual(r.items.map(i => i.stockAmount), [1, 0, null]);
+  });
+
   test('missing __NEXT_DATA__ yields no items, no throw', () => {
     const empty = parseTalabatGrocery('<html><body>no data</body></html>', SRC_URL);
     assert.equal(empty.items.length, 0);

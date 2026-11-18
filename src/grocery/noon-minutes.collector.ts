@@ -1,4 +1,5 @@
 import { fetchHTMLViaBrowser } from '../services/brightdata.service';
+import { fetchGroceryPageViaScrapeDo, scrapeDoEnabledFor } from '../services/scrapedo-transport';
 import { pushGroceryToDatabase } from './db/grocery-push';
 import {
   acquireLock,
@@ -57,6 +58,7 @@ export async function collectNoonMinutes(opts: NoonCollectOptions = {}): Promise
   const categories = opts.categories ?? resolveNoonCategories();
   const fetchHtml =
     opts.fetchHtml ??
+    (scrapeDoEnabledFor('noon-minutes') ? fetchGroceryPageViaScrapeDo : undefined) ??
     ((url: string) =>
       fetchHTMLViaBrowser(url, NOON_PRODUCT_READY_SELECTOR, NOON_CRAWL_DEFAULTS.renderWaitMs, NOON_MINUTES_EXIT_COUNTRY));
   const logger = opts.logger ?? console;

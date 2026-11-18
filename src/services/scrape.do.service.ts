@@ -3,13 +3,14 @@ import { parseNoonSearch } from '../parsers/search/noon.search.parser';
 import { parseCarrefourSearch } from '../parsers/search/carrefour.search.parser';
 import { ProductData } from '../parsers/types';
 import { fetchHTMLViaUnlocker, scrapeProductBD } from './brightdata.service';
+import { fetchListingViaScrapeDo, scrapeDoEnabledForUrl, scrapeProductViaScrapeDo } from './scrapedo-transport';
 
 export async function scrapeProduct(targetUrl: string): Promise<ProductData> {
-  return scrapeProductBD(targetUrl);
+  return scrapeDoEnabledForUrl(targetUrl) ? scrapeProductViaScrapeDo(targetUrl) : scrapeProductBD(targetUrl);
 }
 
 export async function fetchHTML(targetUrl: string): Promise<string> {
-  return fetchHTMLViaUnlocker(targetUrl);
+  return scrapeDoEnabledForUrl(targetUrl) ? fetchListingViaScrapeDo(targetUrl) : fetchHTMLViaUnlocker(targetUrl);
 }
 
 export async function scrapeCategory(targetUrl: string, limit: number = 5): Promise<ProductData[]> {

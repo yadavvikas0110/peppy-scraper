@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import { ProductData } from './types';
+import { fillFromJsonLd } from './jsonld';
 import { extractNoonSku } from '../services/product-identity';
 
 // Product-detail sections that render *other* products' images
@@ -79,7 +80,9 @@ export function parseNoon(html: string, url: string): ProductData {
     description = highlights.replace(/^Highlights\s*/i, '').trim() || null;
   }
 
-  return {
+  // Noon's rendered widgets (rating, stock) are often missing from the delivered HTML, but the page's
+  // JSON-LD Product carries aggregateRating and offers.availability — use it for whatever is missing.
+  return fillFromJsonLd({
     productName,
     productUrl: url,
     imageUrl,
@@ -91,5 +94,5 @@ export function parseNoon(html: string, url: string): ProductData {
     description,
     inStock,
     category: null,
-  };
+  }, html);
 }

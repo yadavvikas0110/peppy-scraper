@@ -9,7 +9,7 @@
     "build": "tsc",
     "start:scraper": "node dist/src/index.js",
     "start:dining": "node dist/src/dining-server.js",
-    "test:scrapedo": "node --require ts-node/register --require ./test/db-guard.ts --test test/shared/scrapedo/scrapedo.client.test.ts",
+    "test:scrapedo": "node --require ts-node/register --require ./test/db-guard.ts --test test/shared/scrapedo/*.test.ts",
     "test:dining": "node --require ts-node/register --require ./test/db-guard.ts --test test/dining/*.test.ts test/shared/db/*.test.ts",
     "test:ecommerce": "node --require ts-node/register --require ./test/db-guard.ts --test test/ecommerce/*.test.ts",
     "test:grocery": "node --require ts-node/register --require ./test/db-guard.ts --test test/grocery/*.test.ts",

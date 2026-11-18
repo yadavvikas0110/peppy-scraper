@@ -1,4 +1,5 @@
 import { fetchHTMLViaUnlocker } from '../services/brightdata.service';
+import { fetchGroceryPageViaScrapeDo, scrapeDoEnabledFor } from '../services/scrapedo-transport';
 import { pushGroceryToDatabase } from './db/grocery-push';
 import { acquireLock, releaseLock, clearStopSignal, shouldStop as stopFileSet } from '../utils/stop-signal';
 import { BundledProduct } from '../parsers/types';
@@ -97,7 +98,7 @@ export async function crawlTalabatGrocery(opts: GroceryCrawlOptions = {}): Promi
   const maxStores = opts.maxStores ?? Infinity;
   const pushBatchSize = opts.pushBatchSize ?? d.pushBatchSize;
   const dryRun = opts.dryRun ?? false;
-  const fetchHtml = opts.fetchHtml ?? fetchHTMLViaUnlocker;
+  const fetchHtml = opts.fetchHtml ?? (scrapeDoEnabledFor('talabat') ? fetchGroceryPageViaScrapeDo : fetchHTMLViaUnlocker);
   const logger = opts.logger ?? console;
   const observedAt = (opts.now ?? new Date()).toISOString();
   const shouldStop = opts.shouldStop ?? (() => false);

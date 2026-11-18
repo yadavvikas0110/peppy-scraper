@@ -105,15 +105,17 @@ export const SITES: Record<SiteKey, SiteConfig> = {
         ? `https://mumzworld.com/en/search?q=${encodeURIComponent(category)}`
         : `https://mumzworld.com/en/search?q=${encodeURIComponent(category)}&p=${page}`,
     parseSearchLinks: parseMumzworldSearch,
+    // Mumzworld moved categories to /en/c/… in Nov 2026 (old paths return 404). Further pages load by
+    // JavaScript: ?p=N returns page 1 again, so these pages give the first ~27 products per category only.
     categories: {
-      'baby-strollers':  (p) => p === 1 ? 'https://www.mumzworld.com/en/baby-gear/strollers'    : `https://www.mumzworld.com/en/baby-gear/strollers?p=${p}`,
-      'baby-carriers':   (p) => p === 1 ? 'https://www.mumzworld.com/en/baby-gear/baby-carriers' : `https://www.mumzworld.com/en/baby-gear/baby-carriers?p=${p}`,
-      'baby-monitors':   (p) => p === 1 ? 'https://www.mumzworld.com/en/nursery/baby-monitors'   : `https://www.mumzworld.com/en/nursery/baby-monitors?p=${p}`,
-      'nursery':         (p) => p === 1 ? 'https://www.mumzworld.com/en/nursery'                 : `https://www.mumzworld.com/en/nursery?p=${p}`,
-      'baby-feeding':    (p) => p === 1 ? 'https://www.mumzworld.com/en/feeding'                 : `https://www.mumzworld.com/en/feeding?p=${p}`,
-      'baby-care':       (p) => p === 1 ? 'https://www.mumzworld.com/en/baby-care'               : `https://www.mumzworld.com/en/baby-care?p=${p}`,
-      'toys':            (p) => p === 1 ? 'https://www.mumzworld.com/en/toys-games'              : `https://www.mumzworld.com/en/toys-games?p=${p}`,
-      'baby-clothing':   (p) => p === 1 ? 'https://www.mumzworld.com/en/clothing'                : `https://www.mumzworld.com/en/clothing?p=${p}`,
+      'baby-strollers':  (p) => p === 1 ? 'https://www.mumzworld.com/en/c/travel-gear/strollers-prams' : `https://www.mumzworld.com/en/c/travel-gear/strollers-prams?p=${p}`,
+      'baby-carriers':   (p) => p === 1 ? 'https://www.mumzworld.com/en/c/travel-gear/baby-carriers' : `https://www.mumzworld.com/en/c/travel-gear/baby-carriers?p=${p}`,
+      'baby-monitors':   (p) => p === 1 ? 'https://www.mumzworld.com/en/c/health-safety/monitors' : `https://www.mumzworld.com/en/c/health-safety/monitors?p=${p}`,
+      'nursery':         (p) => p === 1 ? 'https://www.mumzworld.com/en/c/nursery-bedroom' : `https://www.mumzworld.com/en/c/nursery-bedroom?p=${p}`,
+      'baby-feeding':    (p) => p === 1 ? 'https://www.mumzworld.com/en/c/feeding-and-nursing' : `https://www.mumzworld.com/en/c/feeding-and-nursing?p=${p}`,
+      'baby-care':       (p) => p === 1 ? 'https://www.mumzworld.com/en/c/bath-and-skin-care' : `https://www.mumzworld.com/en/c/bath-and-skin-care?p=${p}`,
+      'toys':            (p) => p === 1 ? 'https://www.mumzworld.com/en/c/toys-learning' : `https://www.mumzworld.com/en/c/toys-learning?p=${p}`,
+      'baby-clothing':   (p) => p === 1 ? 'https://www.mumzworld.com/en/c/baby-clothing-shoes' : `https://www.mumzworld.com/en/c/baby-clothing-shoes?p=${p}`,
     },
   },
 

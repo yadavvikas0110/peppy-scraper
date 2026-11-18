@@ -1,4 +1,5 @@
 import { fetchHTMLViaUnlocker } from '../services/brightdata.service';
+import { fetchGroceryPageViaScrapeDo, scrapeDoEnabledFor } from '../services/scrapedo-transport';
 import { pushGroceryToDatabase } from './db/grocery-push';
 import {
   acquireLock,
@@ -65,7 +66,7 @@ export async function collectDeliverooGrocery(
   opts: DeliverooCollectOptions = {},
 ): Promise<DeliverooCollectResult> {
   const max = opts.max ?? DELIVEROO_CRAWL_DEFAULTS.maxRequests;
-  const fetchHtml = opts.fetchHtml ?? fetchHTMLViaUnlocker;
+  const fetchHtml = opts.fetchHtml ?? (scrapeDoEnabledFor('deliveroo') ? fetchGroceryPageViaScrapeDo : fetchHTMLViaUnlocker);
   const logger = opts.logger ?? console;
   const observedAt = (opts.now ?? new Date()).toISOString();
 
