@@ -11,6 +11,10 @@ const ASIN_RE = /\/(?:dp|gp\/product|gp\/aw\/d|product)\/([A-Z0-9]{10})(?:[/?#]|
 // noon.com/uae-en/<slug>/<SKU>/p/  — the segment right before /p/ is the SKU
 const NOON_SKU_RE = /\/([A-Z0-9]{6,})\/p\/?(?:[?#]|$)/i;
 const CARREFOUR_ID_RE = /\/p\/(\d{5,})(?:[/?#]|$)/;
+// Landmark (Centrepoint, Home Centre): /ae/en/buy-<slug>/p/<sku> — same shape as Carrefour
+const LANDMARK_ID_RE = CARREFOUR_ID_RE;
+// Ounass: /shop-<slug>-<styleColorId>.html, styleColorId = <style>_<colour>
+const OUNASS_ID_RE = /-([a-z0-9]+_\d+)\.html$/i;
 
 function parse(url: string | null | undefined): URL | null {
   if (!url) return null;
@@ -48,6 +52,15 @@ export function marketplaceIdFor(retailerId: string, url: string | null | undefi
     case 'carrefour': {
       const u = parse(url);
       return u ? CARREFOUR_ID_RE.exec(u.pathname)?.[1] ?? null : null;
+    }
+    case 'centrepoint':
+    case 'homecentre': {
+      const u = parse(url);
+      return u ? LANDMARK_ID_RE.exec(u.pathname)?.[1] ?? null : null;
+    }
+    case 'ounass': {
+      const u = parse(url);
+      return u ? OUNASS_ID_RE.exec(u.pathname)?.[1]?.toUpperCase() ?? null : null;
     }
     default:
       return null;

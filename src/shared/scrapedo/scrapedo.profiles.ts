@@ -69,6 +69,13 @@ export const SCRAPE_DO_PROFILES: Record<string, PlatformProfile> = {
   },
   mumzworld: { name: 'Mumzworld', hosts: /(^|\.)mumzworld\.com$/, listing: STANDARD, product: STANDARD },
   letstango: { name: 'Letstango', hosts: /(^|\.)letstango\.com$/, listing: [plain(), uae()], product: [plain(), uae()] },
+  // Ounass and the Landmark sites (Centrepoint, Home Centre) sit behind Cloudflare: a direct request gets the
+  // challenge page. NOT yet measured through Scrape.do (token inactive when these were added, Nov 2026) —
+  // the ladder starts at a UAE IP and escalates; the parser check (isUsable) rejects challenge pages.
+  // Re-measure with src/benchmarks/scrapedo-probe.ts and drop rungs that never win.
+  ounass: { name: 'Ounass', hosts: /(^|\.)ounass\.ae$/, listing: [uae(), residential(), browserResidential()], product: [uae(), residential(), browserResidential()] },
+  centrepoint: { name: 'Centrepoint', hosts: /(^|\.)centrepointstores\.com$/, listing: [uae(), residential(), browserResidential()], product: [uae(), residential(), browserResidential()] },
+  homecentre: { name: 'Home Centre', hosts: /(^|\.)homecentre\.com$/, listing: [uae(), residential(), browserResidential()], product: [uae(), residential(), browserResidential()] },
   // talabat.com: grocery (Talabat Mart) and dining
   talabat: { name: 'Talabat', hosts: /(^|\.)talabat\.com$/, listing: STANDARD, product: STANDARD },
   // deliveroo.ae: grocery (HOP) and dining — plain timed out for restaurants, UAE IP worked (1 credit)

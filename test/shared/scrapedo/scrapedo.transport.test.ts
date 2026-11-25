@@ -161,3 +161,45 @@ describe('Jumbo listing parser', () => {
     assert.deepEqual(parseJumboSearch(html, 'https://www.jumbo.ae/mobile-phones.html'), ['https://www.jumbo.ae/apple-iphone-17-pro-256gb-cosmic-orange.html']);
   });
 });
+
+describe('review fixes (Nov 2026)', () => {
+  test('a parser that throws on a delivered page: credits are counted and it is treated as unreadable, not temporary', async () => {
+    const f = fakeClient([() => ok('<html><title>a</title>page one</html>', 10), () => ok('<html><title>b</title>page two</html>', 25)]);
+    let slept = 0;
+    const fetcher = createProfiledFetcher({ client: f.client as any, logger: quiet, sleep: async () => { slept++; } });
+    await assert.rejects(
+      fetcher.fetch('https://www.amazon.ae/dp/B0DGHYDZR9', { kind: 'product', isUsable: () => { throw new Error('parser exploded'); } }),
+      (e: unknown) => e instanceof ScrapeDoUnreadablePageError,
+    );
+    assert.equal(f.calls.length, 2, 'two options, no delayed "temporary" retry');
+    assert.equal(slept, 0);
+    assert.equal(fetcher.usage().credits, 35, 'charged pages are counted');
+  });
+
+  test('listing page 2+ may be empty: one fetch, no escalation; page 1 stays strict', async () => {
+    const { fetchListingViaScrapeDo } = await import('../../../src/services/scrapedo-transport');
+    const empty = '<!DOCTYPE html><html><head><title>Mobile Phones | Jumbo</title></head><body>' + 'x'.repeat(3000) + '<p>No products found</p></body></html>';
+    const later = fakeClient([() => ok(empty)]);
+    const html = await fetchListingViaScrapeDo('https://www.jumbo.ae/mobile-phones.html?pageNo=3', createProfiledFetcher({ client: later.client as any, logger: quiet, sleep: noSleep }), { allowEmpty: true });
+    assert.equal(html, empty);
+    assert.equal(later.calls.length, 1);
+
+    const first = fakeClient([() => ok(empty), () => ok(empty)]);
+    await assert.rejects(
+      fetchListingViaScrapeDo('https://www.jumbo.ae/mobile-phones.html?pageNo=1', createProfiledFetcher({ client: first.client as any, logger: quiet, sleep: noSleep })),
+      (e: unknown) => e instanceof ScrapeDoUnreadablePageError,
+    );
+
+    // A stub (no title, cut off) is never accepted as "empty"
+    const stub = fakeClient([() => ok('<html><body>loading'), () => ok('<html><body>loading')]);
+    await assert.rejects(fetchListingViaScrapeDo('https://www.jumbo.ae/mobile-phones.html?pageNo=2', createProfiledFetcher({ client: stub.client as any, logger: quiet, sleep: noSleep }), { allowEmpty: true }));
+  });
+
+  test('account and circuit errors are stop/pause errors for the scrape loop', async () => {
+    const { isStopError, isPauseError } = await import('../../../src/services/playwright.service');
+    assert.equal(isStopError(new ScrapeDoAccountError('x')), true);
+    assert.equal(isPauseError(new ScrapeDoCircuitOpenError('x')), true);
+    assert.equal(isStopError(new Error('Scrape.do could not fetch')), false);
+    assert.equal(isPauseError(new Error('x')), false);
+  });
+});

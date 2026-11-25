@@ -16,12 +16,18 @@ const LEGACY_PRICE_IDS = ['#priceblock_ourprice', '#priceblock_dealprice', '#pri
 
 const MAX_PLAUSIBLE_PRICE = 1_000_000;
 
-function parsePrice(text: string): { price: number; currency: string | null } | null {
+// First money amount and the currency written right before it. Amazon appends prose to the hidden
+// price text ("AED 1,099.00 with 15 percent savings"), so the whole string must never be read as one number.
+const MONEY_RE = /([A-Za-z؀-ۿ$€£.]{1,6})?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?/;
+
+export function parsePrice(text: string): { price: number; currency: string | null } | null {
   const cleaned = text.replace(/\s+/g, ' ').trim();
-  const numeric = cleaned.replace(/[^0-9.,]/g, '').replace(/,/g, '');
-  const price = parseFloat(numeric);
+  const m = MONEY_RE.exec(cleaned);
+  if (!m) return null;
+  const price = parseFloat(`${m[2].replace(/,/g, '')}.${m[3] ?? '0'}`);
   if (!Number.isFinite(price) || price <= 0 || price > MAX_PLAUSIBLE_PRICE) return null;
-  return { price, currency: cleaned.replace(/[\d.,\s ]/g, '').trim() || null };
+  const currency = m[1]?.replace(/\.+$/, '').trim() || null;
+  return { price, currency };
 }
 
 export function extractAmazonBuyBoxPrice($: cheerio.CheerioAPI): { price: number; currency: string | null } | null {

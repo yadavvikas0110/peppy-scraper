@@ -6,6 +6,8 @@ import { parseJumboSearch } from '../parsers/search/jumbo.search.parser';
 import { parseMumzworldSearch } from '../parsers/search/mumzworld.search.parser';
 import { parseNamshiSearch } from '../parsers/search/namshi.search.parser';
 import { carrefourSitemapSearch } from '../services/carrefour.sitemap';
+import { parseLandmarkSearch } from '../parsers/landmark.parser';
+import { parseOunassSearch, OUNASS_PAGE_SIZE } from '../parsers/ounass.parser';
 
 export type SiteKey =
   | 'amazon'
@@ -15,7 +17,13 @@ export type SiteKey =
   | 'jumbo'
   | 'mumzworld'
   | 'namshi'
-  | 'letstango';
+  | 'letstango'
+  | 'ounass'
+  | 'centrepoint'
+  | 'homecentre';
+
+/** Every site key, in display order (used by config validation and the bulk runner). */
+export const SITE_KEYS: SiteKey[] = ['amazon', 'noon', 'carrefour', 'sharafdg', 'jumbo', 'mumzworld', 'namshi', 'letstango', 'ounass', 'centrepoint', 'homecentre'];
 
 export interface SiteConfig {
   hostname: string;
@@ -24,9 +32,26 @@ export interface SiteConfig {
   buildSearchUrl: (category: string, page: number) => string;
   parseSearchLinks: (html: string, baseUrl: string) => string[];
   collectLinks?: (category: string, count: number) => Promise<string[]>;
+  /**
+   * Use the search / category pages instead of collectLinks when the site runs on Scrape.do.
+   * (Carrefour: its sitemap keyword match returns old, mostly out-of-stock listings; the search page
+   * through Scrape.do returns current, ranked products for 1 credit — measured 25 Nov 2026.)
+   */
+  listingPagesOnScrapeDo?: boolean;
   /** Category browse URLs — keyed by categoryKey (e.g. 'smartphones', 'laptops') */
   categories?: Record<string, (page: number) => string>;
 }
+
+// Landmark Group (Centrepoint, Home Centre): category pages /ae/en/c/<code>, pagination ?p=N (1-based;
+// verified Nov 2026: the last pagination link equals nbPages). Search: /ae/en/search/?q=… (same state).
+const landmarkCategory = (host: string, code: string) => (p: number) =>
+  `https://${host}/ae/en/c/${code}${p > 1 ? `?p=${p}` : ''}`;
+const landmarkCategories = (host: string, map: Record<string, string>) =>
+  Object.fromEntries(Object.entries(map).map(([key, code]) => [key, landmarkCategory(host, code)]));
+
+// Ounass: 24 products per page, pagination ?fh_start_index=<offset> (verified Nov 2026)
+const ounassCategory = (path: string) => (p: number) =>
+  `https://www.ounass.ae${path}${p > 1 ? `?fh_start_index=${(p - 1) * OUNASS_PAGE_SIZE}` : ''}`;
 
 export const SITES: Record<SiteKey, SiteConfig> = {
   // ── Existing sites ─────────────────────────────────────────────────────────
@@ -50,6 +75,7 @@ export const SITES: Record<SiteKey, SiteConfig> = {
       `https://www.carrefouruae.com/mafuae/en/search?keyword=${encodeURIComponent(category)}&page=${page}`,
     parseSearchLinks: parseCarrefourSearch,
     collectLinks: (category, count) => carrefourSitemapSearch(category, count),
+    listingPagesOnScrapeDo: true,
   },
 
   sharafdg: {
@@ -143,5 +169,74 @@ export const SITES: Record<SiteKey, SiteConfig> = {
     // Unused for Shopify — collectShopifyProducts handles everything
     buildSearchUrl: () => '',
     parseSearchLinks: () => [],
+  },
+
+  // ── Scrape.do-only sites (Cloudflare; no Bright Data parser) ────────────────
+  // Category paths below were read from the live sites' navigation (Nov 2026).
+
+  ounass: {
+    hostname: 'ounass.ae',
+    buildSearchUrl: (category, page) =>
+      `https://www.ounass.ae/search?q=${encodeURIComponent(category)}${page > 1 ? `&fh_start_index=${(page - 1) * OUNASS_PAGE_SIZE}` : ''}`,
+    parseSearchLinks: parseOunassSearch,
+    categories: {
+      'women-fashion': ounassCategory('/women/clothing'),
+      'women-dresses': ounassCategory('/women/clothing/dresses'),
+      'abayas':        ounassCategory('/women/clothing/abayas'),
+      'women-shoes':   ounassCategory('/women/shoes'),
+      'bags':          ounassCategory('/women/bags'),
+      'beauty':        ounassCategory('/women/beauty'),
+      'jewellery':     ounassCategory('/women/jewellery'),
+      'accessories':   ounassCategory('/women/accessories'),
+    },
+  },
+
+  centrepoint: {
+    hostname: 'centrepointstores.com',
+    buildSearchUrl: (category, page) =>
+      `https://www.centrepointstores.com/ae/en/search/?q=${encodeURIComponent(category)}${page > 1 ? `&p=${page}` : ''}`,
+    parseSearchLinks: parseLandmarkSearch,
+    categories: landmarkCategories('www.centrepointstores.com', {
+      'fragrance':      'beautyandpersonalcare-fragrance',
+      'makeup':         'beautyandpersonalcare-makeup',
+      'women-fashion':  'women-clothing',
+      'women-dresses':  'women-clothing-dresses',
+      'men-fashion':    'men-clothing',
+      'women-shoes':    'women-shoes',
+      'men-shoes':      'men-shoes',
+      'sneakers':       'men-shoes-sneakers',
+      'bags':           'women-bagsandwallets',
+      'toys':           'toys',
+      'baby-strollers': 'baby-gear-strollersandprams',
+      'bedding':        'household-bedding',
+      'cookware':       'household-kitchen',
+      'dinnerware':     'household-dining',
+    }),
+  },
+
+  homecentre: {
+    hostname: 'homecentre.com',
+    buildSearchUrl: (category, page) =>
+      `https://www.homecentre.com/ae/en/search/?q=${encodeURIComponent(category)}${page > 1 ? `&p=${page}` : ''}`,
+    parseSearchLinks: parseLandmarkSearch,
+    categories: landmarkCategories('www.homecentre.com', {
+      'kitchen-appliances': 'household-appliances-kitchenappliances',
+      'air-fryers':         'household-appliances-kitchenappliances-airfryers',
+      'coffee-machines':    'household-appliances-kitchenappliances-coffeemachines',
+      'kettles':            'household-appliances-kitchenappliances-electrickettles',
+      'blenders':           'household-appliances-kitchenappliances-blendersmixersandgrinders',
+      'microwaves':         'household-appliances-kitchenappliances-microwavesandovens',
+      'vacuum-cleaners':    'household-appliances-homeappliances-vacuumcleaners',
+      'air-purifiers':      'household-appliances-homeappliances-airpurifiers',
+      'irons':              'household-appliances-homeappliances-ironandsteamers',
+      'tvs':                'household-appliances-televisions',
+      'large-appliances':   'household-appliances-largeappliances',
+      'office-chairs':      'furniture-office-officechairs',
+      'mattresses':         'furniture-mattresses',
+      'sofas':              'furniture-sofaandseating',
+      'bedding':            'household-bedding',
+      'cookware':           'household-kitchen-cookware',
+      'dinnerware':         'household-dining-dinnerware',
+    }),
   },
 };

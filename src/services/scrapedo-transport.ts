@@ -2,7 +2,8 @@
  * Scrape.do as the transport for the shopping and grocery pipelines (dining already uses it).
  *
  * Switched on per platform with SCRAPE_DO_SITES (comma-separated profile keys, or "all"):
- *   amazon, noon, carrefour, sharafdg, jumbo, namshi, mumzworld, letstango, talabat, deliveroo, noon-minutes
+ *   amazon, noon, carrefour, sharafdg, jumbo, namshi, mumzworld, letstango, ounass, centrepoint, homecentre,
+ *   talabat, deliveroo, noon-minutes
  * Unset → nothing changes (Bright Data stays the transport). This module never imports Bright Data.
  *
  * Every fetch goes through the per-platform profiles and retry rules (shared/scrapedo/), and is
@@ -24,6 +25,8 @@ import { parseSharafDGSearch } from '../parsers/search/sharafdg.search.parser';
 import { parseJumboSearch } from '../parsers/search/jumbo.search.parser';
 import { parseMumzworldSearch } from '../parsers/search/mumzworld.search.parser';
 import { parseNamshiSearch } from '../parsers/search/namshi.search.parser';
+import { parseLandmark, parseLandmarkSearch } from '../parsers/landmark.parser';
+import { parseOunass, parseOunassSearch } from '../parsers/ounass.parser';
 import { fillFromJsonLd } from '../parsers/jsonld';
 import { profileForUrl, SCRAPE_DO_PROFILES } from '../shared/scrapedo/scrapedo.profiles';
 import { ProfiledFetcher, sharedProfiledFetcher } from '../shared/scrapedo/scrapedo.fetcher';
@@ -52,10 +55,12 @@ type SearchParser = (html: string, baseUrl: string) => string[];
 const PRODUCT_PARSERS: Record<string, ProductParser> = {
   amazon: parseAmazon, noon: parseNoon, carrefour: parseCarrefour, sharafdg: parseSharafDG,
   jumbo: parseJumbo, mumzworld: parseMumzworld, namshi: parseNamshi,
+  ounass: parseOunass, centrepoint: parseLandmark, homecentre: parseLandmark,
 };
 const SEARCH_PARSERS: Record<string, SearchParser> = {
   amazon: parseAmazonSearch, noon: parseNoonSearch, carrefour: parseCarrefourSearch, sharafdg: parseSharafDGSearch,
   jumbo: parseJumboSearch, mumzworld: parseMumzworldSearch, namshi: parseNamshiSearch,
+  ounass: parseOunassSearch, centrepoint: parseLandmarkSearch, homecentre: parseLandmarkSearch,
 };
 
 function parseProduct(key: string, html: string, url: string): ProductData {
@@ -67,11 +72,32 @@ function parseProduct(key: string, html: string, url: string): ProductData {
 /** A product page is loaded when it shows a product name. No price (e.g. no seller offer) is real data, not a block. */
 const isProductPage = (p: ProductData) => !!p.productName;
 
+/** A delivered page that is a real, complete document (not a stub or challenge) — it may list no products. */
+export function isCompleteEmptyListing(html: string): boolean {
+  return html.length > 2000 && /<title[^>]*>[^<]+/i.test(html) && /<\/html>/i.test(html);
+}
+
+export interface ListingFetchOptions {
+  /**
+   * The page may legitimately list nothing (page 2+ past the end of a category). Page 1 stays strict:
+   * a first page without products usually means the shop served a shell or a block, so a better option
+   * is tried. Without this, the end of every paginated category cost two rejected fetches and was
+   * reported as a parser failure.
+   */
+  allowEmpty?: boolean;
+}
+
 /** Search / category listing page: usable when our search parser finds product links. */
-export async function fetchListingViaScrapeDo(url: string, fetcher: ProfiledFetcher = sharedProfiledFetcher()): Promise<string> {
+export async function fetchListingViaScrapeDo(
+  url: string,
+  fetcher: ProfiledFetcher = sharedProfiledFetcher(),
+  options: ListingFetchOptions = {},
+): Promise<string> {
   const key = profileForUrl(url)?.key ?? 'default';
   const parse = SEARCH_PARSERS[key];
-  const res = await fetcher.fetch(url, { kind: 'listing', isUsable: parse ? (h, u) => parse(h, u).length > 0 : h => h.length > 5000 });
+  const hasLinks = parse ? (h: string, u: string) => parse(h, u).length > 0 : (h: string) => h.length > 5000;
+  const isUsable = options.allowEmpty ? (h: string, u: string) => hasLinks(h, u) || isCompleteEmptyListing(h) : hasLinks;
+  const res = await fetcher.fetch(url, { kind: 'listing', isUsable });
   return res.html;
 }
 

@@ -13,6 +13,9 @@ export const DELIVEROO_LOCK_FILE = path.join(process.cwd(), 'output', 'cron.groc
 export const DELIVEROO_STOP_FILE = path.join(process.cwd(), 'output', 'stop.grocery.deliveroo.signal');
 export const NOON_LOCK_FILE = path.join(process.cwd(), 'output', 'cron.grocery.noon.lock');
 export const NOON_STOP_FILE = path.join(process.cwd(), 'output', 'stop.grocery.noon.signal');
+// Shopping bulk pipeline (src/shopping): its own lock and stop signal
+export const SHOPPING_BULK_LOCK_FILE = path.join(process.cwd(), 'output', 'shopping-bulk.lock');
+export const SHOPPING_BULK_STOP_FILE = path.join(process.cwd(), 'output', 'stop.shopping-bulk.signal');
 
 export function shouldStop(stopFile: string = STOP_FILE): boolean {
   return fs.existsSync(stopFile);
@@ -22,7 +25,7 @@ export function clearStopSignal(stopFile: string = STOP_FILE): void {
   try { fs.unlinkSync(stopFile); } catch {}
 }
 
-export type LockMode = 'full' | 'demo' | 'grocery';
+export type LockMode = 'full' | 'demo' | 'grocery' | 'shopping-bulk';
 
 export function acquireLock(mode: LockMode = 'full', lockFile: string = LOCK_FILE): boolean {
   try {

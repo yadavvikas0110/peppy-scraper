@@ -184,7 +184,29 @@ const SITE_METHODS: Record<SiteKey, string> = {
   mumzworld: 'Bright Data Unlocker (HTTP)',
   namshi: 'Bright Data Browser (CDP)',
   letstango: 'Shopify products.json (direct)',
+  ounass: 'Scrape.do only (SCRAPE_DO_SITES)',
+  centrepoint: 'Scrape.do only (SCRAPE_DO_SITES)',
+  homecentre: 'Scrape.do only (SCRAPE_DO_SITES)',
 };
+
+// Shopping bulk pipeline: day-by-day statistics (UAE calendar day) — scraped / failed / credits per platform,
+// products written per day. ?days=30 (max 365). Behind the same x-api-key as every other route.
+app.get('/api/shopping/daily-stats', async (req, res) => {
+  try {
+    const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+    const { readDailyStats } = await import('./shopping/shopping-bulk.store');
+    const { getMongoDb } = await import('./shared/db/mongo');
+    const rows = await readDailyStats(await getMongoDb(), days);
+    const byDay: Record<string, { day: string; total: any; platforms: any[] }> = {};
+    for (const r of rows) {
+      const d = (byDay[r.day] ??= { day: r.day, total: null, platforms: [] });
+      if (r.platform === '_all') d.total = r; else d.platforms.push(r);
+    }
+    res.json({ success: true, days, data: Object.values(byDay) });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: String(e?.message ?? e).slice(0, 200) });
+  }
+});
 
 app.get('/api/config', (_req, res) => {
   const queriesByCategory: Record<string, number> = {};

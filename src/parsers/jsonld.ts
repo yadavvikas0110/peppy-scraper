@@ -1,4 +1,4 @@
-import type { ProductData } from './types';
+import { normalizeGtin, type ProductData } from './types';
 
 /**
  * schema.org JSON-LD reader for product pages (shared by the site parsers).
@@ -60,6 +60,23 @@ export interface JsonLdProduct {
   description: string | null;
   ratings: number | null;
   reviewCount: number | null;
+  gtin: string | null;
+  brand: string | null;
+}
+
+function gtinOf(node: any, offer: any): string | null {
+  for (const src of [node, offer]) {
+    for (const key of ['gtin13', 'gtin', 'gtin12', 'gtin14', 'gtin8', 'ean']) {
+      const g = normalizeGtin(src?.[key]);
+      if (g) return g;
+    }
+  }
+  return null;
+}
+
+function brandName(brand: any): string | null {
+  const name = typeof brand === 'string' ? brand : brand?.name;
+  return typeof name === 'string' && name.trim() ? name.trim() : null;
 }
 
 /** schema.org Product → product fields; null when the page has no Product block. */
@@ -88,6 +105,8 @@ export function extractJsonLdProduct(html: string): JsonLdProduct | null {
     description: typeof product.description === 'string' ? product.description : null,
     ratings: Number.isFinite(ratingValue) && ratingValue > 0 ? ratingValue : null,
     reviewCount: Number.isFinite(reviewCount) && reviewCount > 0 ? reviewCount : null,
+    gtin: gtinOf(product, offer),
+    brand: brandName(product.brand),
   };
 }
 
@@ -106,5 +125,7 @@ export function fillFromJsonLd(product: ProductData, html: string): ProductData 
   if (out.reviewCount == null && ld.reviewCount != null) out.reviewCount = ld.reviewCount;
   if (out.inStock == null && ld.inStock != null) out.inStock = ld.inStock;
   if (!out.description && ld.description) out.description = ld.description;
+  if (!out.gtin && ld.gtin) out.gtin = ld.gtin;
+  if (!out.brand && ld.brand) out.brand = ld.brand;
   return out;
 }

@@ -34,6 +34,11 @@ export class ImageRehoster {
     this.sem = new Semaphore(concurrency);
   }
 
+  /** True when the URL already points at our own bucket/CDN. */
+  isOwnUrl(url: string): boolean {
+    return !!url && this.isOwn(url);
+  }
+
   /** Our URL, or null when the upload failed (the image is dropped). */
   rehost(url: string): Promise<string | null> {
     if (!url) return Promise.resolve(null);

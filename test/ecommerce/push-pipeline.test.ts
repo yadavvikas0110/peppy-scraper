@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   derivePricing,
   findExistingDocument,
+  isInsertable,
   markStaleInDocument,
   markStaleOffers,
   mergeDuplicateBundles,
@@ -83,7 +84,9 @@ describe('toMongoProduct stock policy', () => {
     const p = product(bundle('Phone', [offer('amazon', null, undefined, { inStock: false }), offer('noon', null, undefined, { inStock: null })]));
     assert.deepEqual(p.retailers.map(r => r.retailerId), ['amazon']);
     assert.equal('price' in p.retailers[0], false);
-    assert.equal(toMongoProduct(bundle('Phone', [offer('amazon', 100)], { images: [] })), null);
+    const imageless = toMongoProduct(bundle('Phone', [offer('amazon', 100)], { images: [] }))!;
+    assert.deepEqual(imageless.images, []);
+    assert.equal(isInsertable(imageless), false, 'an image-less product never creates a document');
   });
 
   test('lastSeenAt is the observation time, not the push time', () => {

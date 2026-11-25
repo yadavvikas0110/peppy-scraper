@@ -24,7 +24,7 @@ import { initVectorTagger } from './vector-tagger.service';
 import { connectChroma, isChromaAvailable } from './chroma.service';
 import { collectShopifyProducts } from './shopify.service';
 import { shouldStop } from '../utils/stop-signal';
-import { fetchListingViaScrapeDo, scrapeDoEnabledForUrl, scrapeProductViaScrapeDo } from './scrapedo-transport';
+import { fetchListingViaScrapeDo, scrapeDoEnabledFor, scrapeDoEnabledForUrl, scrapeProductViaScrapeDo } from './scrapedo-transport';
 
 export { closeBrowserPool as closeBrowser };
 
@@ -73,9 +73,14 @@ export function withoutEmbeddings(bundles: BundledProduct[]): BundledProduct[] {
   return bundles.map(({ embedding, ...rest }) => rest);
 }
 
-async function fetchSearchHTML(url: string): Promise<string> {
+export interface SearchFetchContext {
+  /** 1-based listing page number */
+  page?: number;
+}
+
+async function fetchSearchHTML(url: string, ctx: SearchFetchContext = {}): Promise<string> {
   // Platforms switched to Scrape.do (SCRAPE_DO_SITES) use its profiles and retry rules instead
-  if (scrapeDoEnabledForUrl(url)) return fetchListingViaScrapeDo(url);
+  if (scrapeDoEnabledForUrl(url)) return fetchListingViaScrapeDo(url, undefined, { allowEmpty: (ctx.page ?? 1) > 1 });
   const hostname = new URL(url).hostname;
   const isAmazon = STATIC_SEARCH_HOSTS.test(hostname);
 
@@ -170,12 +175,26 @@ export interface SiteOutcome {
   skipped?: number;
   /** Product links collected for this run */
   links?: number;
+  /** Links left unscraped because the platform was paused (kept in the checkpoint for the next run) */
+  pending?: number;
   reason?: string;
 }
 
-/** Errors that mean "stop now, resume later" rather than "this product failed" (e.g. budget exhausted). */
-function isStopError(e: any): boolean {
-  return e?.name === 'BudgetExhaustedError';
+/**
+ * Errors that mean "stop now, resume later" rather than "this product failed": the daily budget,
+ * or a Scrape.do account problem (credits used up, token revoked) — every further page would fail
+ * the same way, so the rest of the links stay unscraped for a resume instead of being marked failed.
+ */
+export function isStopError(e: any): boolean {
+  return e?.name === 'BudgetExhaustedError' || e?.name === 'ScrapeDoAccountError';
+}
+
+/**
+ * The platform's circuit breaker is open (too many failed pages in a row): stop this site only.
+ * Its remaining links are left pending — not failed — and other sites keep going.
+ */
+export function isPauseError(e: any): boolean {
+  return e?.name === 'ScrapeDoCircuitOpenError';
 }
 
 export function isAccessRefusal(message: string): boolean {
@@ -185,7 +204,7 @@ export function isAccessRefusal(message: string): boolean {
 /** Network-facing operations, injectable so job status logic can be tested offline. */
 export interface BulkScrapeDeps {
   scrapeProduct(url: string): Promise<ProductData>;
-  fetchSearchHtml(url: string): Promise<string>;
+  fetchSearchHtml(url: string, ctx?: SearchFetchContext): Promise<string>;
   collectShopify(hostname: string, category: string, count: number): Promise<ProductData[]>;
   bundle: typeof bundleProducts;
   shouldStop(): boolean;
@@ -195,6 +214,8 @@ export interface BulkScrapeDeps {
   env: NodeJS.ProcessEnv;
   /** Optional: skip links whose product is still fresh (counted as skipped, not scraped) */
   shouldSkipUrl?: (site: SiteKey, url: string) => boolean;
+  /** Product pages fetched at once per site (default 1). The transport's own limiter still applies. */
+  productConcurrency?: number;
 }
 
 export const defaultBulkScrapeDeps: BulkScrapeDeps = {
@@ -207,6 +228,7 @@ export const defaultBulkScrapeDeps: BulkScrapeDeps = {
   now: () => new Date(),
   get outputDir() { return process.env.SCRAPER_OUTPUT_DIR || path.join(process.cwd(), 'output'); },
   get env() { return process.env; },
+  get productConcurrency() { return Math.max(1, Math.floor(Number(process.env.SCRAPE_PRODUCT_CONCURRENCY) || 1)); },
 };
 
 interface ScrapeOneSiteOptions {
@@ -263,7 +285,8 @@ async function scrapeOneSite(opts: ScrapeOneSiteOptions, deps: BulkScrapeDeps): 
     let allLinks: string[];
     let searchError: string | undefined;
 
-    if (siteConfig.collectLinks) {
+    const useCollector = !!siteConfig.collectLinks && !(siteConfig.listingPagesOnScrapeDo && scrapeDoEnabledFor(site, deps.env));
+    if (useCollector && siteConfig.collectLinks) {
       console.log(`[${site}] Collecting links via custom collector...`);
       allLinks = await siteConfig.collectLinks(category, count);
     } else {
@@ -281,7 +304,7 @@ async function scrapeOneSite(opts: ScrapeOneSiteOptions, deps: BulkScrapeDeps): 
 
         let pageHtml: string;
         try {
-          pageHtml = await deps.fetchSearchHtml(searchUrl);
+          pageHtml = await deps.fetchSearchHtml(searchUrl, { page: pageNum });
         } catch (e: any) {
           if (isStopError(e)) {
             return { site, status: 'stopped', scraped: 0, failed: 0, reason: e.message };
@@ -338,47 +361,64 @@ async function scrapeOneSite(opts: ScrapeOneSiteOptions, deps: BulkScrapeDeps): 
     checkpoint.scraped.filter(s => s.site === site).map(s => s.url)
   );
   const alreadyFailed = new Set(checkpoint.failed.map(f => f.url));
-  const pending = allLinks.filter(l => !alreadyDone.has(l) && !alreadyFailed.has(l));
-  const remaining = deps.shouldSkipUrl ? pending.filter(l => !deps.shouldSkipUrl!(site, l)) : pending;
-  const skipped = pending.length - remaining.length;
+  const notDone = allLinks.filter(l => !alreadyDone.has(l) && !alreadyFailed.has(l));
+  const remaining = deps.shouldSkipUrl ? notDone.filter(l => !deps.shouldSkipUrl!(site, l)) : notDone;
+  const skipped = notDone.length - remaining.length;
 
   console.log(`[${site}] Scraping ${remaining.length} remaining (${alreadyDone.size} already done, ${skipped} still fresh — skipped)...`);
 
-  let stopped = false;
-  let stopReason = 'stop signal';
+  const concurrency = Math.max(1, Math.floor(deps.productConcurrency ?? 1));
+  const run = { halt: null as null | 'stop' | 'pause', reason: 'stop signal' };
   let refusal: string | undefined;
-  for (const link of remaining) {
-    if (deps.shouldStop()) {
-      console.log(`[${site}] Stop signal — aborting; progress kept in checkpoint.`);
-      stopped = true;
-      break;
-    }
-    try {
-      const data = await deps.scrapeProduct(link);
-      stamp(data);
-      checkpoint.scraped.push({ site, url: link, data });
-      saveCheckpoint(checkpoint);
-      console.log(`[${site}] ✓ ${(data.productName || link).slice(0, 60)}`);
-    } catch (e: any) {
-      if (isStopError(e)) {
-        // Not this product's fault — leave it unscraped so a resume picks it up
-        console.warn(`[${site}] ${e.message} — stopping; progress kept in checkpoint.`);
-        stopped = true;
-        stopReason = e.message;
-        break;
+  let next = 0;
+
+  // A small worker pool: each worker takes the next link until the list is done or the site halts.
+  // Results are recorded as they arrive, so a crash loses at most the pages in flight.
+  const worker = async () => {
+    while (!run.halt) {
+      if (deps.shouldStop()) {
+        if (!run.halt) console.log(`[${site}] Stop signal — aborting; progress kept in checkpoint.`);
+        run.halt ??= 'stop';
+        return;
       }
-      checkpoint.failed.push({ url: link, message: e.message });
-      saveCheckpoint(checkpoint);
-      console.error(`[${site}] ✗ ${link}: ${e.message}`);
-      if (isAccessRefusal(e.message)) refusal ??= e.message;
+      const link = remaining[next++];
+      if (link === undefined) return;
+      try {
+        const data = await deps.scrapeProduct(link);
+        stamp(data);
+        checkpoint.scraped.push({ site, url: link, data });
+        saveCheckpoint(checkpoint);
+        console.log(`[${site}] ✓ ${(data.productName || link).slice(0, 60)}`);
+      } catch (e: any) {
+        if (isStopError(e) || isPauseError(e)) {
+          // Not this product's fault — leave it unscraped so a resume picks it up
+          if (!run.halt) {
+            run.halt = isStopError(e) ? 'stop' : 'pause';
+            run.reason = e.message;
+            console.warn(`[${site}] ${e.message} — ${run.halt === 'stop' ? 'stopping' : 'pausing this site'}; progress kept in checkpoint.`);
+          }
+          return;
+        }
+        checkpoint.failed.push({ url: link, message: e.message });
+        saveCheckpoint(checkpoint);
+        console.error(`[${site}] ✗ ${link}: ${e.message}`);
+        if (isAccessRefusal(e.message)) refusal ??= e.message;
+      }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, remaining.length) }, worker));
 
   const ok = scrapedCount();
   const fail = checkpoint.failed.filter(f => allLinks.includes(f.url)).length;
-  console.log(`[${site}] Done: ${ok} ok, ${fail} errors.`);
+  const handled = new Set([...checkpoint.scraped.filter(s => s.site === site).map(s => s.url), ...checkpoint.failed.map(f => f.url)]);
+  const pending = remaining.filter(l => !handled.has(l)).length;
+  console.log(`[${site}] Done: ${ok} ok, ${fail} errors${pending ? `, ${pending} pending` : ''}.`);
   const counts = { scraped: ok, failed: fail, skipped, links: allLinks.length };
-  if (stopped) return { site, status: 'stopped', ...counts, reason: stopReason };
+  if (run.halt === 'stop') return { site, status: 'stopped', ...counts, pending, reason: run.reason };
+  if (run.halt === 'pause') {
+    const reason = `paused: ${run.reason} (${pending} link(s) left for the next run)`;
+    return ok > 0 ? { site, status: 'complete', ...counts, pending, reason } : { site, status: 'failed', ...counts, pending, reason };
+  }
   // Every link still fresh is a successful no-op, not a failure
   if (ok > 0 || (skipped > 0 && fail === 0)) return { site, status: 'complete', ...counts };
   if (refusal) return { site, status: 'unsupported', ...counts, reason: refusal };
@@ -387,7 +427,8 @@ async function scrapeOneSite(opts: ScrapeOneSiteOptions, deps: BulkScrapeDeps): 
 
 export function jobStatusOf(outcomes: SiteOutcome[]): JobStatus {
   if (outcomes.some(o => o.status === 'stopped')) return 'stopped';
-  if (outcomes.length > 0 && outcomes.every(o => o.status === 'complete')) return 'complete';
+  // A site paused with links left (circuit breaker) is not complete, even though it published data
+  if (outcomes.length > 0 && outcomes.every(o => o.status === 'complete' && !o.pending)) return 'complete';
   if (outcomes.some(o => o.status === 'complete')) return 'partial';
   return 'failed';
 }
@@ -534,7 +575,8 @@ export async function scrapeBulk(options: {
 
   // Keep the checkpoint while a site that was attempted failed, so a rerun inside the resume
   // window retries just that site. Unsupported sites cannot be fixed by rerunning.
-  const attemptedAllComplete = siteResults.every(r => r.status === 'complete' || r.status === 'unsupported');
+  // A paused site (pending links) also keeps it, so the next run scrapes only what is left.
+  const attemptedAllComplete = siteResults.every(r => (r.status === 'complete' && !r.pending) || r.status === 'unsupported');
   if (attemptedAllComplete) deleteCheckpoint(jobId);
   return result;
 }

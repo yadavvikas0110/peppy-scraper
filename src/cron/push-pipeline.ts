@@ -12,13 +12,14 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { Collection, MongoClient } from 'mongodb';
 import axios from 'axios';
-import { BundledProduct, RetailerOffer, StockStatus, toStockStatus } from '../parsers/types';
+import { BundledProduct, RetailerOffer, StockStatus, toStockStatus, normalizeGtin } from '../parsers/types';
 import { embedBatch, isEmbeddingAvailable } from '../services/embedding.service';
 import { connectChroma, upsertProductsBatch, isChromaAvailable } from '../services/chroma.service';
 import { getMongoConfig, redactMongoUri } from '../shared/db/mongo';
 import { groceryMatchKey } from '../grocery/grocery-match-key';
 import { canonicalProductUrl, isAffiliateUrl, marketplaceIdFor, offerIdentityKey } from '../services/product-identity';
 import { SCRAPER_API_KEY_HEADER } from '../utils/api-key';
+import { crossMatchKeys, findCrossRetailerMatch } from '../services/cross-match';
 
 // ── Category inference ────────────────────────────────────────────────────────
 const QUERY_TO_TAXONOMY: Array<{ pattern: RegExp; broadCategory: string; subCategory: string }> = [
@@ -164,6 +165,8 @@ export interface MongoRetailerOffer {
   isStale?: boolean;
   /** Regular price above `price` when the retailer shows a discount; null = observed without one (clears a stored value) */
   originalPrice?: number | null;
+  /** Barcode of this listing, when the retailer states one */
+  gtin?: string;
 }
 
 export interface MongoProduct {
@@ -180,6 +183,10 @@ export interface MongoProduct {
   retailers: MongoRetailerOffer[];
   /** Cross-platform grocery identity (brand+size+noun); set only for Groceries. */
   groceryMatchKey?: string;
+  /** Barcodes seen on any retailer for this product (cross-platform identity) */
+  gtins?: string[];
+  /** "brand|model" keys used to find this product from other platforms (see services/cross-match.ts) */
+  matchKeys?: string[];
 }
 
 function dropUndefined<T extends object>(obj: T): T {
@@ -211,6 +218,7 @@ export function toMongoOffer(r: RetailerOffer): MongoRetailerOffer | null {
     lastSeenAt:   toDate(r.observedAt),
     originalPrice: hasPrice && typeof r.originalPrice === 'number' && r.originalPrice > r.price! ? r.originalPrice
       : r.originalPrice === undefined ? undefined : null,
+    gtin:         normalizeGtin(r.gtin) ?? undefined,
   });
 }
 
@@ -220,16 +228,21 @@ export function toMongoProduct(bundle: BundledProduct): MongoProduct | null {
 
   const retailers = bundle.retailers.map(toMongoOffer).filter((o): o is MongoRetailerOffer => o !== null);
   if (retailers.length === 0) return null;
+  // No image (e.g. every upload failed): the offer may still join an existing product that has images,
+  // but it can never create a new one (isInsertable)
   const images = bundle.images.filter(Boolean);
-  if (images.length === 0) return null; // reject no-image products
 
   // Cross-platform grocery identity so the same item on Talabat/Deliveroo/Noon merges.
   const gKey = broadCategory === 'Groceries' ? (groceryMatchKey(bundle.name) ?? undefined) : undefined;
+  const brand = bundle.brand || extractBrand(bundle.tags);
+  const gtins = [...new Set(retailers.map(r => r.gtin).filter((g): g is string => !!g))];
+  // Grocery has its own cross-platform key; fuzzy model matching is for durable goods
+  const matchKeys = broadCategory === 'Groceries' ? [] : crossMatchKeys(bundle.name, brand);
 
   return dropUndefined({
     name:         bundle.name,
     description:  bundle.description ?? undefined,
-    brand:        bundle.brand || extractBrand(bundle.tags),
+    brand,
     sku:          bundle.sku || undefined,
     category:     broadCategory,
     subcategory:  subCategory,
@@ -239,12 +252,14 @@ export function toMongoProduct(bundle: BundledProduct): MongoProduct | null {
     tags:         bundle.tags,
     retailers,
     groceryMatchKey: gKey,
+    gtins:        gtins.length ? gtins : undefined,
+    matchKeys:    matchKeys.length ? matchKeys : undefined,
   });
 }
 
-/** Only products with at least one priced offer may create a new document. */
+/** Only products with at least one priced offer AND an image may create a new document. */
 export function isInsertable(p: MongoProduct): boolean {
-  return p.retailers.some(r => r.price !== undefined);
+  return p.images.length > 0 && p.retailers.some(r => r.price !== undefined);
 }
 
 // ── Derived pricing ───────────────────────────────────────────────────────────
@@ -325,12 +340,35 @@ export function mergeOffer(existing: any | undefined, incoming: MongoRetailerOff
   return merged;
 }
 
+export interface MergeOptions {
+  /**
+   * True for URLs on our own S3/CDN. When set, a stored gallery that still holds retailer URLs is
+   * upgraded with this run's re-hosted images (own images already stored are kept first).
+   */
+  isOwnImage?: (url: string) => boolean;
+}
+
+/** Stored images win (admin edits survive) — unless they are retailer URLs and we now have our own copies. */
+export function mergeImages(existing: string[] | undefined, incoming: string[], opts: MergeOptions = {}): string[] {
+  const stored = (existing ?? []).filter(Boolean);
+  if (!stored.length) return incoming;
+  if (!opts.isOwnImage || !incoming.length) return stored;
+  const own = stored.filter(u => opts.isOwnImage!(u));
+  if (own.length === stored.length) return stored;
+  return [...new Set([...own, ...incoming])];
+}
+
+const union = (a: string[] | undefined, b: string[] | undefined): string[] | undefined => {
+  const all = [...new Set([...(a ?? []), ...(b ?? [])])];
+  return all.length ? all : undefined;
+};
+
 /**
  * Fields to $set on an existing document (or the full new document when `existing` is null).
  * Fills name/description/brand/category/images only when missing so admin edits survive, and
  * never writes backend-owned mapping fields — it only flags the product for re-mapping.
  */
-export function mergeProduct(existing: any | null, p: MongoProduct, now: Date): Record<string, unknown> {
+export function mergeProduct(existing: any | null, p: MongoProduct, now: Date, opts: MergeOptions = {}): Record<string, unknown> {
   const stored: any[] = existing?.retailers ?? [];
   const incomingIds = new Set(p.retailers.map(r => r.retailerId));
   const merged = p.retailers
@@ -349,13 +387,15 @@ export function mergeProduct(existing: any | null, p: MongoProduct, now: Date): 
     sku:         fill('sku', p.sku),
     category:    fill('category', p.category),
     subcategory: fill('subcategory', p.subcategory),
-    images:      existing?.images?.length ? existing.images : p.images,
+    images:      mergeImages(existing?.images, p.images, opts),
     tags:        [...new Set([...(existing?.tags ?? []), ...p.tags])],
     // Ratings are fresh observations — overwrite when this run has them
     rating,
     reviewCount,
     retailers,
     groceryMatchKey: p.groceryMatchKey ?? existing?.groceryMatchKey,
+    gtins:       union(existing?.gtins, p.gtins),
+    matchKeys:   union(existing?.matchKeys, p.matchKeys),
     ...derivePricing(retailers, rating, reviewCount),
     ingestMappingStatus: 'pending',
     ingestPendingAt: now,
@@ -376,9 +416,13 @@ export function buildCandidateQuery(products: MongoProduct[]): Record<string, un
   const urls = new Set<string>();
   const asins = new Set<string>();
   const gKeys = new Set<string>();
+  const gtins = new Set<string>();
+  const matchKeys = new Set<string>();
   for (const p of products) {
     names.add(p.name);
     if (p.groceryMatchKey) gKeys.add(p.groceryMatchKey);
+    p.gtins?.forEach(g => gtins.add(g));
+    p.matchKeys?.forEach(k => matchKeys.add(k));
     for (const r of p.retailers) {
       if (r.externalId) ids.add(r.externalId);
       if (r.canonicalUrl) canonical.add(r.canonicalUrl);
@@ -388,6 +432,8 @@ export function buildCandidateQuery(products: MongoProduct[]): Record<string, un
   }
   const or: Record<string, unknown>[] = [{ name: { $in: [...names] } }];
   if (gKeys.size) or.push({ groceryMatchKey: { $in: [...gKeys] } });
+  if (gtins.size) or.push({ gtins: { $in: [...gtins] } }, { 'retailers.gtin': { $in: [...gtins] } });
+  if (matchKeys.size) or.push({ matchKeys: { $in: [...matchKeys] } });
   if (ids.size) or.push({ 'retailers.externalId': { $in: [...ids] } });
   if (canonical.size) or.push({ 'retailers.canonicalUrl': { $in: [...canonical] } });
   if (urls.size) or.push({ 'retailers.productUrl': { $in: [...urls] } });
@@ -425,6 +471,11 @@ export function findExistingDocument(p: MongoProduct, docs: any[]): any | null {
     byIdentity.sort((a, b) => String(a._id).localeCompare(String(b._id)));
   }
   if (byIdentity.length) return byIdentity[0];
+  // Same barcode stored by another retailer's offer
+  if (p.gtins?.length) {
+    const byGtin = findCrossRetailerMatch({ ...p, matchKeys: [] }, docs);
+    if (byGtin) return byGtin;
+  }
   // Cross-platform grocery identity: the same item on Talabat/Deliveroo/Noon has
   // different titles but the same key, so it merges into one document.
   if (p.groceryMatchKey) {
@@ -433,7 +484,10 @@ export function findExistingDocument(p: MongoProduct, docs: any[]): any | null {
     if (byGrocery.length) return byGrocery[0];
   }
   const key = nameKey(p.name);
-  return docs.find(d => typeof d.name === 'string' && nameKey(d.name) === key) ?? null;
+  const byName = docs.find(d => typeof d.name === 'string' && nameKey(d.name) === key);
+  if (byName) return byName;
+  // The same product listed by another platform under a different title (guarded; see cross-match.ts)
+  return p.matchKeys?.length ? findCrossRetailerMatch({ ...p, gtins: [] }, docs) : null;
 }
 
 // ── Mongo connection helper ───────────────────────────────────────────────────
@@ -477,7 +531,7 @@ export interface WriteResult {
  * updatedAt is unchanged since it was read, so a concurrent admin edit is never overwritten.
  * Conflicting products are re-read and retried once.
  */
-export async function writeProducts(col: ProductsCollection, products: MongoProduct[], now: Date): Promise<WriteResult> {
+export async function writeProducts(col: ProductsCollection, products: MongoProduct[], now: Date, opts: MergeOptions = {}): Promise<WriteResult> {
   const result: WriteResult = { inserted: 0, updated: 0, matched: 0, conflicts: 0, skipped: 0 };
   let pending = products;
 
@@ -498,14 +552,14 @@ export async function writeProducts(col: ProductsCollection, products: MongoProd
       for (const p of batch) {
         const target = findExistingDocument(p, [...docs.map(current), ...inserts]);
         if (target && inserts.includes(target)) {
-          Object.assign(target, mergeProduct(target, p, now));
+          Object.assign(target, mergeProduct(target, p, now, opts));
         } else if (target) {
           if (attempt === 0) result.matched++;
           const id = String(target._id);
           const base = working.get(id)?.base ?? docs.find(d => String(d._id) === id);
-          working.set(id, { base, fields: { ...working.get(id)?.fields, ...mergeProduct(target, p, now) } });
+          working.set(id, { base, fields: { ...working.get(id)?.fields, ...mergeProduct(target, p, now, opts) } });
         } else if (isInsertable(p)) {
-          inserts.push(mergeProduct(null, p, now));
+          inserts.push(mergeProduct(null, p, now, opts));
         } else {
           result.skipped++;
         }
@@ -548,7 +602,7 @@ export interface PushResult {
 
 export async function pushToDatabase(
   rawBundles: BundledProduct[],
-  opts: { collection?: ProductsCollection; now?: Date; requestMapping?: () => Promise<MappingRequestResult> } = {},
+  opts: { collection?: ProductsCollection; now?: Date; requestMapping?: () => Promise<MappingRequestResult> } & MergeOptions = {},
 ): Promise<PushResult> {
   const errors: string[] = [];
 
@@ -565,11 +619,11 @@ export async function pushToDatabase(
   const now = opts.now ?? new Date();
   const write = async (col: ProductsCollection) => {
     // Support the identity lookups; the backend's Mongoose schema owns the other indexes
-    for (const field of ['retailers.productUrl', 'retailers.externalId', 'retailers.canonicalUrl', 'name', 'ingestMappingStatus', 'groceryMatchKey']) {
+    for (const field of ['retailers.productUrl', 'retailers.externalId', 'retailers.canonicalUrl', 'name', 'ingestMappingStatus', 'groceryMatchKey', 'gtins', 'retailers.gtin', 'matchKeys']) {
       await col.createIndex?.({ [field]: 1 }, { background: true })
         .catch((e: any) => console.warn(`[push] Index ${field} not created: ${e.message}`));
     }
-    return products.length ? writeProducts(col, products, now) : { inserted: 0, updated: 0, matched: 0, conflicts: 0, skipped: 0 };
+    return products.length ? writeProducts(col, products, now, { isOwnImage: opts.isOwnImage }) : { inserted: 0, updated: 0, matched: 0, conflicts: 0, skipped: 0 };
   };
 
   let written: WriteResult;
@@ -579,7 +633,7 @@ export async function pushToDatabase(
     console.log(`[push] Target: ${getMongoConfig().dbName}.products_clean`);
     written = await withProductsCollection(col => write(col as unknown as ProductsCollection));
   }
-  console.log(`[push] ${written.inserted} new, ${written.updated} updated, ${written.skipped} skipped (no priced offer), ${written.conflicts} write conflict(s)`);
+  console.log(`[push] ${written.inserted} new, ${written.updated} updated, ${written.skipped} skipped (no priced offer or no image, and no existing product to join), ${written.conflicts} write conflict(s)`);
   if (written.conflicts) errors.push(`${written.conflicts} write conflict(s) with concurrent edits`);
 
   // Categories, roles and variant groups are owned by the backend — ask it to map pending products

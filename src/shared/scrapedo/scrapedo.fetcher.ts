@@ -111,25 +111,37 @@ export function createProfiledFetcher(deps: ProfiledFetcherDeps = {}) {
 
   async function attempt(url: string, rung: Rung, opts: ProfiledFetchOptions, log: AttemptLog[]) {
     const t0 = now();
+    let res: Awaited<ReturnType<typeof client.fetchHtml>>;
     try {
-      const res = await client.fetchHtml(url, { ...rung.options, timeout: rung.timeoutMs ?? 60_000, client: { maxRetries: 0 } });
-      const credits = res.requestCost ?? 0;
-      const finalUrl = res.finalUrl || url;
-      if (looksBlocked(res.html)) {
-        log.push({ rung: rung.label, ok: false, credits, ms: now() - t0, reason: 'anti-bot page' });
-        return { ok: false as const, credits, outcome: 'escalate' as Outcome };
-      }
-      if (opts.isUsable && !opts.isUsable(res.html, finalUrl)) {
-        log.push({ rung: rung.label, ok: false, credits, ms: now() - t0, reason: 'page without the expected data' });
-        return { ok: false as const, credits, outcome: 'unreadable' as Outcome };
-      }
-      log.push({ rung: rung.label, ok: true, credits, ms: now() - t0 });
-      return { ok: true as const, credits, html: res.html, finalUrl };
+      res = await client.fetchHtml(url, { ...rung.options, timeout: rung.timeoutMs ?? 60_000, client: { maxRetries: 0 } });
     } catch (e) {
       const { outcome, reason } = classify(e);
       log.push({ rung: rung.label, ok: false, credits: 0, ms: now() - t0, reason: reason.slice(0, 160) });
       return { ok: false as const, credits: 0, outcome };
     }
+    // The page was delivered (and charged): from here on a failure is about its content, never the network
+    const credits = res.requestCost ?? 0;
+    const finalUrl = res.finalUrl || url;
+    if (looksBlocked(res.html)) {
+      log.push({ rung: rung.label, ok: false, credits, ms: now() - t0, reason: 'anti-bot page' });
+      return { ok: false as const, credits, outcome: 'escalate' as Outcome };
+    }
+    let usable = true;
+    let reason = 'page without the expected data';
+    if (opts.isUsable) {
+      try {
+        usable = opts.isUsable(res.html, finalUrl);
+      } catch (e) {
+        usable = false;
+        reason = `parser error: ${String((e as any)?.message ?? e).slice(0, 120)}`;
+      }
+    }
+    if (!usable) {
+      log.push({ rung: rung.label, ok: false, credits, ms: now() - t0, reason });
+      return { ok: false as const, credits, outcome: 'unreadable' as Outcome };
+    }
+    log.push({ rung: rung.label, ok: true, credits, ms: now() - t0 });
+    return { ok: true as const, credits, html: res.html, finalUrl };
   }
 
   async function fetch(url: string, opts: ProfiledFetchOptions): Promise<ProfiledFetchResult> {

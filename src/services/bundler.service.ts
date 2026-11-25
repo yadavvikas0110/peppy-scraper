@@ -1,4 +1,4 @@
-import { ProductData, RetailerOffer, BundledProduct, toStockStatus } from '../parsers/types';
+import { ProductData, RetailerOffer, BundledProduct, toStockStatus, normalizeGtin } from '../parsers/types';
 import { SiteKey } from '../config/sites';
 import { tagBundleWithVectors, getBundleEmbedding } from './vector-tagger.service';
 import { canonicalProductUrl, marketplaceIdFor } from './product-identity';
@@ -12,6 +12,9 @@ const RETAILER_DISPLAY_NAMES: Record<SiteKey, string> = {
   mumzworld:  'Mumzworld',
   namshi:     'Namshi',
   letstango:  'Letstango',
+  ounass:     'Ounass',
+  centrepoint: 'Centrepoint',
+  homecentre: 'Home Centre',
 };
 
 const SIMILARITY_THRESHOLD = 0.45;
@@ -38,7 +41,7 @@ function getTokens(name: string): Set<string> {
   );
 }
 
-function jaccardSimilarity(a: string, b: string): number {
+export function jaccardSimilarity(a: string, b: string): number {
   const ta = getTokens(a);
   const tb = getTokens(b);
   let intersection = 0;
@@ -143,6 +146,7 @@ export function brandOf(name: string): string | null {
 // Cross-retailer prices of one product rarely differ by more than this; a bigger gap
 // usually means a wrong match (accessory, refurbished, multipack) and goes to review.
 export const MAX_PRICE_RATIO = 2;
+export { SIMILARITY_THRESHOLD };
 // Names this close but below SIMILARITY_THRESHOLD are reported for review, never merged
 const REVIEW_SIMILARITY_FLOOR = 0.3;
 
@@ -151,6 +155,22 @@ export interface MatchReview {
   similarity: number;
   incoming: { site: string; name: string; price: number | null; productUrl: string | null };
   candidate: { name: string; retailers: string[]; prices: number[] };
+}
+
+// Colours stated in a title. Different colours are different SKUs (and often different prices);
+// a title without a colour gives no signal. Brand words that are colours (Black+Decker) are removed first.
+const COLOUR_WORDS = ['black', 'white', 'silver', 'gold', 'grey', 'blue', 'red', 'green', 'pink', 'purple', 'yellow', 'orange', 'brown', 'beige', 'navy', 'rose', 'cream'];
+const COLOUR_BRANDS = /\bblack\s*(?:\+|&|and)?\s*decker\b|\bred\s*dragon\b|\bwhite\s*westinghouse\b/gi;
+
+export function coloursOf(name: string): Set<string> {
+  const words = name.toLowerCase().replace(COLOUR_BRANDS, ' ').replace(/\bgray\b/g, 'grey').split(/[^a-z]+/);
+  return new Set(words.filter(w => COLOUR_WORDS.includes(w)));
+}
+
+export function coloursCompatible(a: string, b: string): boolean {
+  const ca = coloursOf(a);
+  const cb = coloursOf(b);
+  return ca.size === 0 || cb.size === 0 || [...ca].some(c => cb.has(c));
 }
 
 /** null when two titles may describe the same product, else the reason they cannot. */
@@ -163,6 +183,7 @@ export function identityConflict(a: string, b: string): string | null {
   const bb = brandOf(b);
   if (ba && bb && ba !== bb) return 'brand_mismatch';
   if (!variantsCompatible(a, b)) return 'variant_mismatch';
+  if (!coloursCompatible(a, b)) return 'colour_mismatch';
   return null;
 }
 
@@ -192,6 +213,7 @@ export function buildOffer(site: SiteKey, data: ProductData): RetailerOffer {
     ratings: data.ratings,
     reviewCount: data.reviewCount,
     externalId: marketplaceIdFor(site, data.productUrl),
+    gtin: normalizeGtin(data.gtin),
     canonicalUrl: canonicalProductUrl(data.productUrl),
     observedAt: data.scrapedAt ?? null,
     // Only a regular price above what the customer pays is a discount. A parser that reports the
@@ -200,6 +222,18 @@ export function buildOffer(site: SiteKey, data: ProductData): RetailerOffer {
     ...(data.originalPrice === undefined ? {}
       : { originalPrice: data.originalPrice != null && data.price != null && data.originalPrice > data.price ? data.originalPrice : null }),
   };
+}
+
+const compactText = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]/g, '');
+const NON_BRANDS = /^(generic|unbranded|no ?brand|other|others|n\/?a|none)$/i;
+
+/** "Dual Basket AirFryer XXL" + brand Philips → "Philips Dual Basket AirFryer XXL" (titles compare across shops). */
+export function withBrand(name: string, brand: string | null | undefined): string {
+  const b = brand?.trim();
+  if (!b || NON_BRANDS.test(b) || b.length > 40) return name;
+  const cb = compactText(b);
+  if (!cb || compactText(name).includes(cb)) return name;
+  return `${b} ${name}`;
 }
 
 export async function bundleProducts(
@@ -211,8 +245,10 @@ export async function bundleProducts(
 ): Promise<BundledProduct[]> {
   const bundles: BundledProduct[] = [];
 
-  for (const { site, data } of items) {
-    if (!data.productName) continue;
+  for (const { site, data: raw } of items) {
+    if (!raw.productName) continue;
+    const productName = withBrand(raw.productName, raw.brand);
+    const data = { ...raw, productName };
     const offer = buildOffer(site, data);
     const incomingImages = data.imageUrls?.length ? data.imageUrls : (data.imageUrl ? [data.imageUrl] : []);
 
@@ -225,7 +261,13 @@ export async function bundleProducts(
     let bestSim = 0;
     let bestReview: MatchReview | null = null;
 
-    for (const bundle of bundles) {
+    // Same barcode on another retailer is the same product, whatever the titles say
+    if (offer.gtin) {
+      bestMatch = bundles.find(b => !b.retailers.some(r => r.retailerId === site) && b.retailers.some(r => r.gtin === offer.gtin)) ?? null;
+      if (bestMatch) bestSim = 1;
+    }
+
+    for (const bundle of bestMatch ? [] : bundles) {
       if (!bundle.name || bundle.retailers.some(r => r.retailerId === site)) continue;
       const sim = jaccardSimilarity(data.productName, bundle.name);
       if (sim < REVIEW_SIMILARITY_FLOOR) continue;
