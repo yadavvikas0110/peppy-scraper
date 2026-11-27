@@ -177,3 +177,16 @@ describe('shopping bulk CLI defaults from env', () => {
     assert.throws(() => parseArgs([], { SHOPPING_BULK_FRESH_HOURS: 'abc' }), /SHOPPING_BULK_FRESH_HOURS/);
   });
 });
+
+describe('24/7 loop back-off', () => {
+  test('interval 0: a finished pass restarts at once, a failed pass waits the back-off', () => {
+    const h = harness({ SHOPPING_BULK_INTERVAL_HOURS: '0', AUTO_LOOP_FAILURE_BACKOFF_MINUTES: '15' });
+    h.ctl.start({});
+    h.spawned[0].child.exit(0);
+    assert.equal(h.timers[h.timers.length - 1].ms, 0);
+    h.fire();
+    h.spawned[1].child.exit(1);
+    assert.equal(h.timers[h.timers.length - 1].ms, 15 * 60 * 1000);
+    assert.match(h.logs.join('\n'), /back-off 15 min/);
+  });
+});

@@ -1,35 +1,2534 @@
 {
   "_comment": "Shopping bulk pipeline catalog (npm run shopping:bulk). One entry per category: `key` is permanent (checkpoints, reports). `platforms` = Priority-1 sites that sell it. A platform with a category page for `categoryKey` (src/config/sites.ts) browses it; the others search `category`. `count` = products per platform per run. broadCategory/subCategory must exist in src/config/taxonomy.ts. Set enabled:false to pause.",
   "categories": [
-    { "key": "smartphones",     "label": "Smartphones",          "category": "smartphone",          "categoryKey": "smartphones",     "broadCategory": "Electronics",    "subCategory": "Smartphones",         "count": 40, "platforms": ["amazon", "noon", "carrefour", "jumbo"] },
-    { "key": "laptops",         "label": "Laptops",              "category": "laptop",              "categoryKey": "laptops",         "broadCategory": "Electronics",    "subCategory": "Laptops",             "count": 40, "platforms": ["amazon", "noon", "carrefour", "jumbo"] },
-    { "key": "tablets",         "label": "Tablets",              "category": "tablet",              "categoryKey": "tablets",         "broadCategory": "Electronics",    "subCategory": "Tablets",             "count": 30, "platforms": ["amazon", "noon", "carrefour", "jumbo"] },
-    { "key": "televisions",     "label": "Televisions",          "category": "smart tv",            "categoryKey": "tvs",             "broadCategory": "Electronics",    "subCategory": "Televisions",         "count": 30, "platforms": ["amazon", "noon", "carrefour", "jumbo", "homecentre"] },
-    { "key": "headphones",      "label": "Headphones & Earbuds", "category": "headphones",          "categoryKey": "audio",           "broadCategory": "Electronics",    "subCategory": "Audio & Headphones",  "count": 30, "platforms": ["amazon", "noon", "carrefour", "jumbo"] },
-    { "key": "smartwatches",    "label": "Smartwatches",         "category": "smart watch",         "categoryKey": "wearables",       "broadCategory": "Electronics",    "subCategory": "Wearables",           "count": 30, "platforms": ["amazon", "noon", "carrefour", "jumbo"] },
-    { "key": "gaming-consoles", "label": "Gaming",               "category": "gaming console",      "categoryKey": "gaming",          "broadCategory": "Electronics",    "subCategory": "Gaming",              "count": 20, "platforms": ["amazon", "noon", "carrefour", "jumbo"] },
-
-    { "key": "air-fryers",      "label": "Air Fryers",           "category": "air fryer",           "categoryKey": "air-fryers",      "broadCategory": "Home & Kitchen", "subCategory": "Kitchen Appliances",  "count": 30, "platforms": ["amazon", "noon", "carrefour", "homecentre"] },
-    { "key": "coffee-machines", "label": "Coffee Machines",      "category": "coffee machine",      "categoryKey": "coffee-machines", "broadCategory": "Home & Kitchen", "subCategory": "Kitchen Appliances",  "count": 30, "platforms": ["amazon", "noon", "carrefour", "homecentre"] },
-    { "key": "blenders",        "label": "Blenders & Mixers",    "category": "blender",             "categoryKey": "blenders",        "broadCategory": "Home & Kitchen", "subCategory": "Kitchen Appliances",  "count": 30, "platforms": ["amazon", "noon", "carrefour", "homecentre"] },
-    { "key": "kettles",         "label": "Electric Kettles",     "category": "electric kettle",     "categoryKey": "kettles",         "broadCategory": "Home & Kitchen", "subCategory": "Kitchen Appliances",  "count": 20, "platforms": ["amazon", "noon", "carrefour", "homecentre"] },
-    { "key": "vacuum-cleaners", "label": "Vacuum Cleaners",      "category": "vacuum cleaner",      "categoryKey": "vacuum-cleaners", "broadCategory": "Home & Kitchen", "subCategory": "Cleaning Appliances", "count": 30, "platforms": ["amazon", "noon", "carrefour", "homecentre"] },
-    { "key": "air-purifiers",   "label": "Air Purifiers",        "category": "air purifier",        "categoryKey": "air-purifiers",   "broadCategory": "Home & Kitchen", "subCategory": "Air Treatment",       "count": 20, "platforms": ["amazon", "noon", "carrefour", "homecentre"] },
-    { "key": "irons",           "label": "Irons & Steamers",     "category": "steam iron",          "categoryKey": "irons",           "broadCategory": "Home & Kitchen", "subCategory": "Kitchen Appliances",  "count": 20, "platforms": ["amazon", "noon", "carrefour", "homecentre"], "enabled": false },
-    { "key": "office-chairs",   "label": "Office Chairs",        "category": "office chair",        "categoryKey": "office-chairs",   "broadCategory": "Home & Kitchen", "subCategory": "Furniture & Bedding", "count": 20, "platforms": ["amazon", "noon", "homecentre"] },
-    { "key": "mattresses",      "label": "Mattresses",           "category": "mattress",            "categoryKey": "mattresses",      "broadCategory": "Home & Kitchen", "subCategory": "Furniture & Bedding", "count": 20, "platforms": ["amazon", "noon", "homecentre"], "enabled": false },
-    { "key": "bedding",         "label": "Bedding",              "category": "bed sheet set",       "categoryKey": "bedding",         "broadCategory": "Home & Kitchen", "subCategory": "Furniture & Bedding", "count": 20, "platforms": ["amazon", "noon", "homecentre", "centrepoint"], "enabled": false },
-
-    { "key": "fragrance",       "label": "Fragrance",            "category": "perfume",             "categoryKey": "fragrance",       "broadCategory": "Personal Care",  "subCategory": "Fragrance",           "count": 40, "platforms": ["amazon", "noon", "carrefour", "centrepoint"] },
-    { "key": "makeup",          "label": "Make-Up",              "category": "makeup",              "categoryKey": "makeup",          "broadCategory": "Personal Care",  "subCategory": "Makeup",              "count": 30, "platforms": ["amazon", "noon", "centrepoint"] },
-
-    { "key": "women-dresses",   "label": "Women's Dresses",      "category": "women dress",         "categoryKey": "women-dresses",   "broadCategory": "Fashion",        "subCategory": "Women Clothing",      "count": 40, "platforms": ["ounass", "centrepoint", "noon"] },
-    { "key": "women-shoes",     "label": "Women's Shoes",        "category": "women shoes",         "categoryKey": "women-shoes",     "broadCategory": "Fashion",        "subCategory": "Footwear",            "count": 40, "platforms": ["ounass", "centrepoint"] },
-    { "key": "sneakers",        "label": "Sneakers",             "category": "men sneakers",        "categoryKey": "sneakers",        "broadCategory": "Fashion",        "subCategory": "Footwear",            "count": 40, "platforms": ["centrepoint", "amazon", "noon"] },
-    { "key": "bags",            "label": "Bags",                 "category": "women handbag",       "categoryKey": "bags",            "broadCategory": "Fashion",        "subCategory": "Accessories",         "count": 30, "platforms": ["ounass", "centrepoint"] },
-    { "key": "abayas",          "label": "Abayas",               "category": "abaya",               "categoryKey": "abayas",          "broadCategory": "Fashion",        "subCategory": "Modest Wear",         "count": 30, "platforms": ["ounass"] },
-
-    { "key": "toys",            "label": "Toys",                 "category": "toys",                "categoryKey": "toys",            "broadCategory": "Baby & Kids",    "subCategory": "Toys & Games",        "count": 30, "platforms": ["centrepoint", "amazon", "noon", "carrefour"] },
-    { "key": "strollers",       "label": "Strollers",            "category": "baby stroller",       "categoryKey": "baby-strollers",  "broadCategory": "Baby & Kids",    "subCategory": "Strollers",           "count": 20, "platforms": ["centrepoint", "amazon", "noon"] }
+    {
+      "key": "smartphones",
+      "label": "Smartphones",
+      "category": "smartphone",
+      "categoryKey": "smartphones",
+      "broadCategory": "Electronics",
+      "subCategory": "Smartphones",
+      "count": 40,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "laptops",
+      "label": "Laptops",
+      "category": "laptop",
+      "categoryKey": "laptops",
+      "broadCategory": "Electronics",
+      "subCategory": "Laptops",
+      "count": 40,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "tablets",
+      "label": "Tablets",
+      "category": "tablet",
+      "categoryKey": "tablets",
+      "broadCategory": "Electronics",
+      "subCategory": "Tablets",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "televisions",
+      "label": "Televisions",
+      "category": "smart tv",
+      "categoryKey": "tvs",
+      "broadCategory": "Electronics",
+      "subCategory": "Televisions",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "headphones",
+      "label": "Headphones & Earbuds",
+      "category": "headphones",
+      "categoryKey": "audio",
+      "broadCategory": "Electronics",
+      "subCategory": "Audio & Headphones",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "smartwatches",
+      "label": "Smartwatches",
+      "category": "smart watch",
+      "categoryKey": "wearables",
+      "broadCategory": "Electronics",
+      "subCategory": "Wearables",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "gaming-consoles",
+      "label": "Gaming",
+      "category": "gaming console",
+      "categoryKey": "gaming",
+      "broadCategory": "Electronics",
+      "subCategory": "Gaming",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "air-fryers",
+      "label": "Air Fryers",
+      "category": "air fryer",
+      "categoryKey": "air-fryers",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "coffee-machines",
+      "label": "Coffee Machines",
+      "category": "coffee machine",
+      "categoryKey": "coffee-machines",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "blenders",
+      "label": "Blenders & Mixers",
+      "category": "blender",
+      "categoryKey": "blenders",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "kettles",
+      "label": "Electric Kettles",
+      "category": "electric kettle",
+      "categoryKey": "kettles",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "vacuum-cleaners",
+      "label": "Vacuum Cleaners",
+      "category": "vacuum cleaner",
+      "categoryKey": "vacuum-cleaners",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Cleaning Appliances",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "air-purifiers",
+      "label": "Air Purifiers",
+      "category": "air purifier",
+      "categoryKey": "air-purifiers",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Air Treatment",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "irons",
+      "label": "Irons & Steamers",
+      "category": "steam iron",
+      "categoryKey": "irons",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ],
+      "enabled": false
+    },
+    {
+      "key": "office-chairs",
+      "label": "Office Chairs",
+      "category": "office chair",
+      "categoryKey": "office-chairs",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Furniture & Bedding",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "mattresses",
+      "label": "Mattresses",
+      "category": "mattress",
+      "categoryKey": "mattresses",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Furniture & Bedding",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre"
+      ],
+      "enabled": false
+    },
+    {
+      "key": "bedding",
+      "label": "Bedding",
+      "category": "bed sheet set",
+      "categoryKey": "bedding",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Furniture & Bedding",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre",
+        "centrepoint"
+      ],
+      "enabled": false
+    },
+    {
+      "key": "fragrance",
+      "label": "Fragrance",
+      "category": "perfume",
+      "categoryKey": "fragrance",
+      "broadCategory": "Personal Care",
+      "subCategory": "Fragrance",
+      "count": 40,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "makeup",
+      "label": "Make-Up",
+      "category": "makeup",
+      "categoryKey": "makeup",
+      "broadCategory": "Personal Care",
+      "subCategory": "Makeup",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "women-dresses",
+      "label": "Women's Dresses",
+      "category": "women dress",
+      "categoryKey": "women-dresses",
+      "broadCategory": "Fashion",
+      "subCategory": "Women Clothing",
+      "count": 40,
+      "platforms": [
+        "ounass",
+        "centrepoint",
+        "noon"
+      ]
+    },
+    {
+      "key": "women-shoes",
+      "label": "Women's Shoes",
+      "category": "women shoes",
+      "categoryKey": "women-shoes",
+      "broadCategory": "Fashion",
+      "subCategory": "Footwear",
+      "count": 40,
+      "platforms": [
+        "ounass",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "sneakers",
+      "label": "Sneakers",
+      "category": "men sneakers",
+      "categoryKey": "sneakers",
+      "broadCategory": "Fashion",
+      "subCategory": "Footwear",
+      "count": 40,
+      "platforms": [
+        "centrepoint",
+        "amazon",
+        "noon"
+      ]
+    },
+    {
+      "key": "bags",
+      "label": "Bags",
+      "category": "women handbag",
+      "categoryKey": "bags",
+      "broadCategory": "Fashion",
+      "subCategory": "Accessories",
+      "count": 30,
+      "platforms": [
+        "ounass",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "abayas",
+      "label": "Abayas",
+      "category": "abaya",
+      "categoryKey": "abayas",
+      "broadCategory": "Fashion",
+      "subCategory": "Modest Wear",
+      "count": 30,
+      "platforms": [
+        "ounass"
+      ]
+    },
+    {
+      "key": "toys",
+      "label": "Toys",
+      "category": "toys",
+      "categoryKey": "toys",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Toys & Games",
+      "count": 30,
+      "platforms": [
+        "centrepoint",
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "strollers",
+      "label": "Strollers",
+      "category": "baby stroller",
+      "categoryKey": "baby-strollers",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Strollers",
+      "count": 20,
+      "platforms": [
+        "centrepoint",
+        "amazon",
+        "noon"
+      ]
+    },
+    {
+      "key": "cameras",
+      "label": "Digital Cameras",
+      "category": "digital camera",
+      "categoryKey": "cameras",
+      "broadCategory": "Electronics",
+      "subCategory": "Cameras",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "action-cameras",
+      "label": "Action Cameras",
+      "category": "action camera",
+      "broadCategory": "Electronics",
+      "subCategory": "Cameras",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "monitors",
+      "label": "Computer Monitors",
+      "category": "computer monitor",
+      "broadCategory": "Electronics",
+      "subCategory": "Monitors",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "gaming-laptops",
+      "label": "Gaming Laptops",
+      "category": "gaming laptop",
+      "broadCategory": "Electronics",
+      "subCategory": "Laptops",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "bluetooth-speakers",
+      "label": "Bluetooth Speakers",
+      "category": "bluetooth speaker",
+      "broadCategory": "Electronics",
+      "subCategory": "Audio & Headphones",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "earbuds",
+      "label": "Wireless Earbuds",
+      "category": "wireless earbuds",
+      "broadCategory": "Electronics",
+      "subCategory": "Audio & Headphones",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "soundbars",
+      "label": "Soundbars",
+      "category": "soundbar",
+      "broadCategory": "Electronics",
+      "subCategory": "Audio & Headphones",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "power-banks",
+      "label": "Power Banks",
+      "category": "power bank",
+      "broadCategory": "Electronics",
+      "subCategory": "Computer Accessories",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "phone-chargers",
+      "label": "Phone Chargers",
+      "category": "fast charger",
+      "broadCategory": "Electronics",
+      "subCategory": "Computer Accessories",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "keyboards",
+      "label": "Keyboards",
+      "category": "keyboard",
+      "broadCategory": "Electronics",
+      "subCategory": "Computer Accessories",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "computer-mice",
+      "label": "Computer Mice",
+      "category": "wireless mouse",
+      "broadCategory": "Electronics",
+      "subCategory": "Computer Accessories",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "smart-home-cameras",
+      "label": "Smart Home Cameras",
+      "category": "smart home security camera",
+      "broadCategory": "Electronics",
+      "subCategory": "Smart Home",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "fitness-trackers",
+      "label": "Fitness Trackers",
+      "category": "fitness tracker",
+      "broadCategory": "Electronics",
+      "subCategory": "Wearables",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "gaming-controllers",
+      "label": "Gaming Controllers",
+      "category": "gaming controller",
+      "broadCategory": "Electronics",
+      "subCategory": "Gaming",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "video-games",
+      "label": "Video Games",
+      "category": "ps5 game",
+      "broadCategory": "Electronics",
+      "subCategory": "Gaming",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "printers",
+      "label": "Printers",
+      "category": "printer",
+      "broadCategory": "Office",
+      "subCategory": "Printers",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "external-drives",
+      "label": "External Hard Drives",
+      "category": "external hard drive",
+      "broadCategory": "Office",
+      "subCategory": "Storage Devices",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "usb-flash-drives",
+      "label": "USB Flash Drives",
+      "category": "usb flash drive",
+      "broadCategory": "Office",
+      "subCategory": "Storage Devices",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "webcams",
+      "label": "Webcams",
+      "category": "webcam",
+      "broadCategory": "Office",
+      "subCategory": "Webcams",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "routers",
+      "label": "WiFi Routers",
+      "category": "wifi router",
+      "broadCategory": "Office",
+      "subCategory": "Peripherals",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "microwaves",
+      "label": "Microwave Ovens",
+      "category": "microwave oven",
+      "categoryKey": "microwaves",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "food-processors",
+      "label": "Food Processors",
+      "category": "food processor",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "juicers",
+      "label": "Juicers",
+      "category": "juicer",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "toasters",
+      "label": "Toasters",
+      "category": "toaster",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "water-dispensers",
+      "label": "Water Dispensers",
+      "category": "water dispenser",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "cookware",
+      "label": "Cookware Sets",
+      "category": "cookware set",
+      "categoryKey": "cookware",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "dinnerware",
+      "label": "Dinnerware",
+      "category": "dinner set",
+      "categoryKey": "dinnerware",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Home Decor",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "refrigerators",
+      "label": "Refrigerators",
+      "category": "refrigerator",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Large Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "washing-machines",
+      "label": "Washing Machines",
+      "category": "washing machine",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Large Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "air-conditioners",
+      "label": "Air Conditioners",
+      "category": "split air conditioner",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Large Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "dishwashers",
+      "label": "Dishwashers",
+      "category": "dishwasher",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Large Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "robot-vacuums",
+      "label": "Robot Vacuums",
+      "category": "robot vacuum cleaner",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Cleaning Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "fans",
+      "label": "Electric Fans",
+      "category": "electric fan",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Air Treatment",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "humidifiers",
+      "label": "Humidifiers",
+      "category": "humidifier",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Air Treatment",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "sofas",
+      "label": "Sofas",
+      "category": "sofa",
+      "categoryKey": "sofas",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Furniture & Bedding",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "wall-decor",
+      "label": "Wall Decor",
+      "category": "wall decor",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Home Decor",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "hair-dryers",
+      "label": "Hair Dryers",
+      "category": "hair dryer",
+      "broadCategory": "Personal Care",
+      "subCategory": "Hair Care",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "hair-straighteners",
+      "label": "Hair Straighteners",
+      "category": "hair straightener",
+      "broadCategory": "Personal Care",
+      "subCategory": "Hair Care",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "trimmers",
+      "label": "Beard Trimmers",
+      "category": "beard trimmer",
+      "broadCategory": "Personal Care",
+      "subCategory": "Grooming",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "shavers",
+      "label": "Electric Shavers",
+      "category": "electric shaver",
+      "broadCategory": "Personal Care",
+      "subCategory": "Grooming",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "electric-toothbrushes",
+      "label": "Electric Toothbrushes",
+      "category": "electric toothbrush",
+      "broadCategory": "Personal Care",
+      "subCategory": "Oral Care",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "skincare",
+      "label": "Face Moisturizers",
+      "category": "face moisturizer",
+      "broadCategory": "Personal Care",
+      "subCategory": "Skincare",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "sunscreen",
+      "label": "Sunscreen",
+      "category": "sunscreen spf 50",
+      "broadCategory": "Personal Care",
+      "subCategory": "Skincare",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "men-fragrance",
+      "label": "Men's Perfume",
+      "category": "men perfume",
+      "broadCategory": "Personal Care",
+      "subCategory": "Fragrance",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "treadmills",
+      "label": "Treadmills",
+      "category": "treadmill",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Cardio Equipment",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "exercise-bikes",
+      "label": "Exercise Bikes",
+      "category": "exercise bike",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Cardio Equipment",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "dumbbells",
+      "label": "Dumbbells",
+      "category": "dumbbells",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Strength Training",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "yoga-mats",
+      "label": "Yoga Mats",
+      "category": "yoga mat",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Yoga",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "protein-powder",
+      "label": "Protein Powder",
+      "category": "whey protein",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Supplements & Nutrition",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "diapers",
+      "label": "Baby Diapers",
+      "category": "baby diapers",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Baby Care",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "baby-car-seats",
+      "label": "Baby Car Seats",
+      "category": "baby car seat",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Safety",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "baby-monitors",
+      "label": "Baby Monitors",
+      "category": "baby monitor",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Safety",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "baby-bottles",
+      "label": "Baby Bottles",
+      "category": "baby feeding bottle",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Feeding",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "lego",
+      "label": "LEGO",
+      "category": "lego",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Toys & Games",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "kids-clothing",
+      "label": "Kids Clothing",
+      "category": "kids clothing",
+      "broadCategory": "Fashion",
+      "subCategory": "Kids",
+      "count": 30,
+      "platforms": [
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "men-clothing",
+      "label": "Men's Clothing",
+      "category": "men t-shirt",
+      "categoryKey": "men-fashion",
+      "broadCategory": "Fashion",
+      "subCategory": "Men Clothing",
+      "count": 40,
+      "platforms": [
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "men-shoes",
+      "label": "Men's Shoes",
+      "category": "men shoes",
+      "categoryKey": "men-shoes",
+      "broadCategory": "Fashion",
+      "subCategory": "Footwear",
+      "count": 40,
+      "platforms": [
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "women-tops",
+      "label": "Women's Tops",
+      "category": "women tops",
+      "broadCategory": "Fashion",
+      "subCategory": "Women Clothing",
+      "count": 40,
+      "platforms": [
+        "ounass",
+        "centrepoint",
+        "noon"
+      ]
+    },
+    {
+      "key": "sportswear",
+      "label": "Sportswear",
+      "category": "women sportswear",
+      "broadCategory": "Fashion",
+      "subCategory": "Clothing",
+      "count": 30,
+      "platforms": [
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "sunglasses",
+      "label": "Sunglasses",
+      "category": "sunglasses",
+      "broadCategory": "Fashion",
+      "subCategory": "Accessories",
+      "count": 30,
+      "platforms": [
+        "ounass",
+        "amazon",
+        "noon",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "backpacks",
+      "label": "Backpacks",
+      "category": "backpack",
+      "broadCategory": "Fashion",
+      "subCategory": "Accessories",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "luggage",
+      "label": "Luggage",
+      "category": "trolley luggage bag",
+      "broadCategory": "Fashion",
+      "subCategory": "Accessories",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "jewellery",
+      "label": "Jewellery",
+      "category": "women jewellery",
+      "categoryKey": "jewellery",
+      "broadCategory": "Fashion",
+      "subCategory": "Accessories",
+      "count": 20,
+      "platforms": [
+        "ounass",
+        "amazon",
+        "noon"
+      ]
+    },
+    {
+      "key": "watches",
+      "label": "Watches",
+      "category": "men watch",
+      "broadCategory": "Luxury",
+      "subCategory": "Watches",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "ounass"
+      ]
+    },
+    {
+      "key": "designer-bags",
+      "label": "Designer Bags",
+      "category": "designer handbag",
+      "broadCategory": "Luxury",
+      "subCategory": "Bags",
+      "count": 20,
+      "platforms": [
+        "ounass",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "luxury-fragrance",
+      "label": "Luxury Fragrance",
+      "category": "luxury perfume",
+      "broadCategory": "Luxury",
+      "subCategory": "Fragrances",
+      "count": 20,
+      "platforms": [
+        "ounass",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "phone-cases",
+      "label": "Phone Cases",
+      "category": "iphone case",
+      "broadCategory": "Electronics",
+      "subCategory": "Computer Accessories",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "screen-protectors",
+      "label": "Screen Protectors",
+      "category": "screen protector",
+      "broadCategory": "Electronics",
+      "subCategory": "Computer Accessories",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "wireless-chargers",
+      "label": "Wireless Chargers",
+      "category": "wireless charger",
+      "broadCategory": "Electronics",
+      "subCategory": "Computer Accessories",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "car-chargers",
+      "label": "Car Chargers",
+      "category": "car charger",
+      "broadCategory": "Electronics",
+      "subCategory": "Computer Accessories",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "usb-cables",
+      "label": "USB Cables",
+      "category": "usb c cable",
+      "broadCategory": "Electronics",
+      "subCategory": "Computer Accessories",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "laptop-bags",
+      "label": "Laptop Bags",
+      "category": "laptop bag",
+      "broadCategory": "Electronics",
+      "subCategory": "Computer Accessories",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "laptop-stands",
+      "label": "Laptop Stands",
+      "category": "laptop stand",
+      "broadCategory": "Electronics",
+      "subCategory": "Computer Accessories",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "smart-speakers",
+      "label": "Smart Speakers",
+      "category": "smart speaker",
+      "broadCategory": "Electronics",
+      "subCategory": "Smart Home",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "smart-plugs",
+      "label": "Smart Plugs",
+      "category": "smart plug",
+      "broadCategory": "Electronics",
+      "subCategory": "Smart Home",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "smart-bulbs",
+      "label": "Smart Bulbs",
+      "category": "smart bulb",
+      "broadCategory": "Electronics",
+      "subCategory": "Smart Home",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "video-doorbells",
+      "label": "Video Doorbells",
+      "category": "video doorbell",
+      "broadCategory": "Electronics",
+      "subCategory": "Smart Home",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "streaming-devices",
+      "label": "Streaming Devices",
+      "category": "android tv box",
+      "broadCategory": "Electronics",
+      "subCategory": "Televisions",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "projectors",
+      "label": "Projectors",
+      "category": "projector",
+      "broadCategory": "Electronics",
+      "subCategory": "Televisions",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "drones",
+      "label": "Drones",
+      "category": "drone camera",
+      "broadCategory": "Electronics",
+      "subCategory": "Cameras",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "instant-cameras",
+      "label": "Instant Cameras",
+      "category": "instant camera",
+      "broadCategory": "Electronics",
+      "subCategory": "Cameras",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "dash-cams",
+      "label": "Dash Cams",
+      "category": "dash cam",
+      "broadCategory": "Electronics",
+      "subCategory": "Cameras",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "gaming-monitors",
+      "label": "Gaming Monitors",
+      "category": "gaming monitor",
+      "broadCategory": "Electronics",
+      "subCategory": "Monitors",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "gaming-headsets",
+      "label": "Gaming Headsets",
+      "category": "gaming headset",
+      "broadCategory": "Electronics",
+      "subCategory": "Gaming",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "gaming-chairs",
+      "label": "Gaming Chairs",
+      "category": "gaming chair",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Furniture & Bedding",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "kids-smartwatches",
+      "label": "Kids Smartwatches",
+      "category": "kids smart watch",
+      "broadCategory": "Electronics",
+      "subCategory": "Wearables",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "e-readers",
+      "label": "E-Readers",
+      "category": "kindle",
+      "broadCategory": "Electronics",
+      "subCategory": "Tablets",
+      "count": 10,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "internal-ssd",
+      "label": "Internal SSDs",
+      "category": "internal ssd",
+      "broadCategory": "Office",
+      "subCategory": "Storage Devices",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "memory-cards",
+      "label": "Memory Cards",
+      "category": "micro sd card",
+      "broadCategory": "Office",
+      "subCategory": "Storage Devices",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "usb-hubs",
+      "label": "USB Hubs",
+      "category": "usb c hub",
+      "broadCategory": "Office",
+      "subCategory": "Hubs",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "ink-cartridges",
+      "label": "Ink Cartridges",
+      "category": "printer ink cartridge",
+      "broadCategory": "Office",
+      "subCategory": "Printers",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "desk-lamps",
+      "label": "Desk Lamps",
+      "category": "desk lamp",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Home Decor",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "office-desks",
+      "label": "Office Desks",
+      "category": "office desk",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Furniture & Bedding",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "rice-cookers",
+      "label": "Rice Cookers",
+      "category": "rice cooker",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "pressure-cookers",
+      "label": "Pressure Cookers",
+      "category": "pressure cooker",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "stand-mixers",
+      "label": "Stand Mixers",
+      "category": "stand mixer",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "hand-blenders",
+      "label": "Hand Blenders",
+      "category": "hand blender",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "coffee-grinders",
+      "label": "Coffee Grinders",
+      "category": "coffee grinder",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "sandwich-makers",
+      "label": "Sandwich Makers",
+      "category": "sandwich maker",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "electric-grills",
+      "label": "Electric Grills",
+      "category": "electric grill",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "electric-ovens",
+      "label": "Electric Ovens",
+      "category": "electric oven",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "knife-sets",
+      "label": "Knife Sets",
+      "category": "kitchen knife set",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "food-containers",
+      "label": "Food Storage Containers",
+      "category": "food storage container",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "water-bottles",
+      "label": "Water Bottles",
+      "category": "insulated water bottle",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Kitchen Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "cooktops",
+      "label": "Cooktops",
+      "category": "gas cooker",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Large Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "freezers",
+      "label": "Freezers",
+      "category": "chest freezer",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Large Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "dryers",
+      "label": "Clothes Dryers",
+      "category": "clothes dryer",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Large Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "water-heaters",
+      "label": "Water Heaters",
+      "category": "water heater",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Large Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "cordless-vacuums",
+      "label": "Cordless Vacuums",
+      "category": "cordless vacuum",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Cleaning Appliances",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "steam-mops",
+      "label": "Steam Mops",
+      "category": "steam mop",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Cleaning Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "pressure-washers",
+      "label": "Pressure Washers",
+      "category": "pressure washer",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Cleaning Appliances",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "air-coolers",
+      "label": "Air Coolers",
+      "category": "air cooler",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Air Treatment",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "dehumidifiers",
+      "label": "Dehumidifiers",
+      "category": "dehumidifier",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Air Treatment",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "heaters",
+      "label": "Room Heaters",
+      "category": "room heater",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Air Treatment",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "pillows",
+      "label": "Pillows",
+      "category": "bed pillow",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Furniture & Bedding",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "towels",
+      "label": "Towels",
+      "category": "bath towel",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Furniture & Bedding",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "rugs",
+      "label": "Rugs",
+      "category": "area rug",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Home Decor",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "curtains",
+      "label": "Curtains",
+      "category": "curtains",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Home Decor",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "storage-organizers",
+      "label": "Storage Organizers",
+      "category": "storage organizer",
+      "broadCategory": "Home & Kitchen",
+      "subCategory": "Home Decor",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "homecentre"
+      ]
+    },
+    {
+      "key": "hair-clippers",
+      "label": "Hair Clippers",
+      "category": "hair clipper",
+      "broadCategory": "Personal Care",
+      "subCategory": "Grooming",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "epilators",
+      "label": "Epilators",
+      "category": "epilator",
+      "broadCategory": "Personal Care",
+      "subCategory": "Grooming",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "deodorants",
+      "label": "Deodorants",
+      "category": "deodorant",
+      "broadCategory": "Personal Care",
+      "subCategory": "Grooming",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "water-flossers",
+      "label": "Water Flossers",
+      "category": "water flosser",
+      "broadCategory": "Personal Care",
+      "subCategory": "Oral Care",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "hair-curlers",
+      "label": "Hair Curlers",
+      "category": "hair curler",
+      "broadCategory": "Personal Care",
+      "subCategory": "Hair Care",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "shampoo",
+      "label": "Shampoo",
+      "category": "shampoo",
+      "broadCategory": "Personal Care",
+      "subCategory": "Hair Care",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "face-serums",
+      "label": "Face Serums",
+      "category": "face serum",
+      "broadCategory": "Personal Care",
+      "subCategory": "Skincare",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "body-lotion",
+      "label": "Body Lotion",
+      "category": "body lotion",
+      "broadCategory": "Personal Care",
+      "subCategory": "Skincare",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "lipstick",
+      "label": "Lipstick",
+      "category": "lipstick",
+      "broadCategory": "Personal Care",
+      "subCategory": "Makeup",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "centrepoint",
+        "ounass"
+      ]
+    },
+    {
+      "key": "foundation",
+      "label": "Foundation",
+      "category": "foundation makeup",
+      "broadCategory": "Personal Care",
+      "subCategory": "Makeup",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "centrepoint",
+        "ounass"
+      ]
+    },
+    {
+      "key": "women-perfume",
+      "label": "Women's Perfume",
+      "category": "women perfume",
+      "broadCategory": "Personal Care",
+      "subCategory": "Fragrance",
+      "count": 30,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "massage-guns",
+      "label": "Massage Guns",
+      "category": "massage gun",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Sports Accessories",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "kettlebells",
+      "label": "Kettlebells",
+      "category": "kettlebell",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Strength Training",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "resistance-bands",
+      "label": "Resistance Bands",
+      "category": "resistance bands",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Strength Training",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "bicycles",
+      "label": "Bicycles",
+      "category": "bicycle",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Sports Accessories",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "electric-scooters",
+      "label": "Electric Scooters",
+      "category": "electric scooter",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Sports Accessories",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "jumbo"
+      ]
+    },
+    {
+      "key": "multivitamins",
+      "label": "Multivitamins",
+      "category": "multivitamin",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Supplements & Nutrition",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "creatine",
+      "label": "Creatine",
+      "category": "creatine",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Supplements & Nutrition",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "camping-gear",
+      "label": "Camping Tents",
+      "category": "camping tent",
+      "broadCategory": "Fitness & Sports",
+      "subCategory": "Sports Accessories",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "baby-wipes",
+      "label": "Baby Wipes",
+      "category": "baby wipes",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Baby Care",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour"
+      ]
+    },
+    {
+      "key": "high-chairs",
+      "label": "High Chairs",
+      "category": "baby high chair",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Baby Gear",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "baby-cribs",
+      "label": "Baby Cribs",
+      "category": "baby crib",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Nursery",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "board-games",
+      "label": "Board Games",
+      "category": "board game",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Toys & Games",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "dolls",
+      "label": "Dolls",
+      "category": "doll",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Toys & Games",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "rc-cars",
+      "label": "Remote Control Cars",
+      "category": "remote control car",
+      "broadCategory": "Baby & Kids",
+      "subCategory": "Toys & Games",
+      "count": 15,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "school-bags",
+      "label": "School Bags",
+      "category": "school bag",
+      "broadCategory": "Fashion",
+      "subCategory": "Accessories",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "carrefour",
+        "centrepoint"
+      ]
+    },
+    {
+      "key": "kids-shoes",
+      "label": "Kids Shoes",
+      "category": "kids shoes",
+      "broadCategory": "Fashion",
+      "subCategory": "Kids",
+      "count": 20,
+      "platforms": [
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "men-jeans",
+      "label": "Men's Jeans",
+      "category": "men jeans",
+      "broadCategory": "Fashion",
+      "subCategory": "Men Clothing",
+      "count": 30,
+      "platforms": [
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "women-jeans",
+      "label": "Women's Jeans",
+      "category": "women jeans",
+      "broadCategory": "Fashion",
+      "subCategory": "Women Clothing",
+      "count": 30,
+      "platforms": [
+        "ounass",
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "men-shirts",
+      "label": "Men's Shirts",
+      "category": "men shirt",
+      "broadCategory": "Fashion",
+      "subCategory": "Men Clothing",
+      "count": 30,
+      "platforms": [
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "hijabs",
+      "label": "Hijabs & Scarves",
+      "category": "hijab scarf",
+      "broadCategory": "Fashion",
+      "subCategory": "Modest Wear",
+      "count": 20,
+      "platforms": [
+        "ounass",
+        "centrepoint",
+        "noon"
+      ]
+    },
+    {
+      "key": "running-shoes",
+      "label": "Running Shoes",
+      "category": "running shoes",
+      "broadCategory": "Fashion",
+      "subCategory": "Footwear",
+      "count": 30,
+      "platforms": [
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "women-sandals",
+      "label": "Women's Sandals",
+      "category": "women sandals",
+      "broadCategory": "Fashion",
+      "subCategory": "Footwear",
+      "count": 20,
+      "platforms": [
+        "ounass",
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "women-heels",
+      "label": "Women's Heels",
+      "category": "women heels",
+      "broadCategory": "Fashion",
+      "subCategory": "Footwear",
+      "count": 20,
+      "platforms": [
+        "ounass",
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "men-sandals",
+      "label": "Men's Sandals",
+      "category": "men sandals",
+      "broadCategory": "Fashion",
+      "subCategory": "Footwear",
+      "count": 20,
+      "platforms": [
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "wallets",
+      "label": "Wallets",
+      "category": "men wallet",
+      "broadCategory": "Fashion",
+      "subCategory": "Accessories",
+      "count": 20,
+      "platforms": [
+        "ounass",
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "caps",
+      "label": "Caps",
+      "category": "baseball cap",
+      "broadCategory": "Fashion",
+      "subCategory": "Accessories",
+      "count": 15,
+      "platforms": [
+        "centrepoint",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "women-watches",
+      "label": "Women's Watches",
+      "category": "women watch",
+      "broadCategory": "Luxury",
+      "subCategory": "Watches",
+      "count": 20,
+      "platforms": [
+        "amazon",
+        "noon",
+        "ounass"
+      ]
+    },
+    {
+      "key": "designer-sunglasses",
+      "label": "Designer Sunglasses",
+      "category": "designer sunglasses",
+      "broadCategory": "Luxury",
+      "subCategory": "Designer Fashion",
+      "count": 15,
+      "platforms": [
+        "ounass",
+        "noon",
+        "amazon"
+      ]
+    },
+    {
+      "key": "designer-sneakers",
+      "label": "Designer Sneakers",
+      "category": "designer sneakers",
+      "broadCategory": "Luxury",
+      "subCategory": "Designer Fashion",
+      "count": 15,
+      "platforms": [
+        "ounass",
+        "noon",
+        "amazon"
+      ]
+    }
   ]
 }
