@@ -119,6 +119,13 @@ export interface BulkRunOptions {
   countPerPlatform?: number;
   /** Scrape and bundle only: no S3 upload, no database write */
   dryRun?: boolean;
+  /**
+   * Products scraped recently (any run, any machine) — skipped, and pagination goes deeper to find
+   * new ones instead (see BulkScrapeDeps.discoverPastFresh). Omit to scrape everything found.
+   */
+  isFresh?: (site: SiteKey, url: string) => boolean;
+  /** Listing pages per platform per category when isFresh is set (default 15) */
+  maxListingPages?: number;
 }
 
 export interface BulkRunDeps {
@@ -234,7 +241,10 @@ export async function runShoppingBulk(options: BulkRunOptions, deps: BulkRunDeps
         subCategory: c.subCategory,
         count: options.countPerPlatform ?? c.count,
         allowUnsupported: true,
-      }, { ...deps.bulkDeps, shouldStop: deps.shouldStop, productConcurrency });
+      }, {
+        ...deps.bulkDeps, shouldStop: deps.shouldStop, productConcurrency,
+        ...(options.isFresh ? { shouldSkipUrl: options.isFresh, discoverPastFresh: true, maxListingPages: options.maxListingPages } : {}),
+      });
     } catch (e: any) {
       log.error(`[bulk:${c.key}] scrape failed: ${e?.message ?? e}`);
       return done({ status: 'error', error: String(e?.message ?? e) });

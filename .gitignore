@@ -11,3 +11,5 @@ output/
 
 # custom scraper database target (CUSTOM_MONGODB_URI) — never committed
 .env.custom
+.env.prod
+.env

@@ -216,6 +216,14 @@ export interface BulkScrapeDeps {
   shouldSkipUrl?: (site: SiteKey, url: string) => boolean;
   /** Product pages fetched at once per site (default 1). The transport's own limiter still applies. */
   productConcurrency?: number;
+  /**
+   * With shouldSkipUrl: fresh links do not count toward `count` while collecting — pagination continues
+   * (up to maxListingPages) until `count` links that need scraping are found. Repeat runs then discover
+   * new products instead of paying again for the same first page of products.
+   */
+  discoverPastFresh?: boolean;
+  /** Listing pages per site per job when discoverPastFresh is on (default 15) */
+  maxListingPages?: number;
 }
 
 export const defaultBulkScrapeDeps: BulkScrapeDeps = {
@@ -281,9 +289,13 @@ async function scrapeOneSite(opts: ScrapeOneSiteOptions, deps: BulkScrapeDeps): 
     }
   }
 
+  // Links passed over while collecting because their product is still fresh (discoverPastFresh)
+  const skippedFresh = new Set<string>();
   if (!checkpoint.links[site]) {
     let allLinks: string[];
     let searchError: string | undefined;
+    const deeper = !!deps.shouldSkipUrl && !!deps.discoverPastFresh;
+    const maxPages = deeper ? Math.max(1, deps.maxListingPages ?? 15) : Infinity;
 
     const useCollector = !!siteConfig.collectLinks && !(siteConfig.listingPagesOnScrapeDo && scrapeDoEnabledFor(site, deps.env));
     if (useCollector && siteConfig.collectLinks) {
@@ -294,6 +306,10 @@ async function scrapeOneSite(opts: ScrapeOneSiteOptions, deps: BulkScrapeDeps): 
       let pageNum = 1;
 
       while (collectedLinks.size < count) {
+        if (pageNum > maxPages) {
+          console.log(`[${site}] Reached ${maxPages} listing pages — ${collectedLinks.size} new, ${skippedFresh.size} still fresh.`);
+          break;
+        }
         if (deps.shouldStop()) {
           return { site, status: 'stopped', scraped: 0, failed: 0, reason: 'stop signal during link collection' };
         }
@@ -324,13 +340,15 @@ async function scrapeOneSite(opts: ScrapeOneSiteOptions, deps: BulkScrapeDeps): 
         }
 
         const prevSize = collectedLinks.size;
+        const prevFresh = skippedFresh.size;
         for (const link of newLinks) {
           if (collectedLinks.size >= count) break;
+          if (deeper && !collectedLinks.has(link) && deps.shouldSkipUrl!(site, link)) { skippedFresh.add(link); continue; }
           collectedLinks.add(link);
         }
 
-        // All returned links were already collected — pagination exhausted
-        if (collectedLinks.size === prevSize) {
+        // All returned links were already seen — pagination exhausted
+        if (collectedLinks.size === prevSize && skippedFresh.size === prevFresh) {
           console.log(`[${site}] Page ${pageNum} returned only duplicates — stopping pagination.`);
           break;
         }
@@ -344,6 +362,10 @@ async function scrapeOneSite(opts: ScrapeOneSiteOptions, deps: BulkScrapeDeps): 
 
     console.log(`[${site}] Collected ${allLinks.length}/${count} links.`);
 
+    if (allLinks.length === 0 && skippedFresh.size > 0) {
+      console.log(`[${site}] Every product found (${skippedFresh.size}) was scraped recently — nothing to pay for.`);
+      return { site, status: 'complete', scraped: 0, failed: 0, skipped: skippedFresh.size, links: 0, reason: 'all products still fresh' };
+    }
     if (allLinks.length === 0) {
       const reason = searchError ? `search failed: ${searchError}` : 'no product links found';
       console.warn(`[${site}] No links collected — ${reason}.`);
@@ -363,7 +385,7 @@ async function scrapeOneSite(opts: ScrapeOneSiteOptions, deps: BulkScrapeDeps): 
   const alreadyFailed = new Set(checkpoint.failed.map(f => f.url));
   const notDone = allLinks.filter(l => !alreadyDone.has(l) && !alreadyFailed.has(l));
   const remaining = deps.shouldSkipUrl ? notDone.filter(l => !deps.shouldSkipUrl!(site, l)) : notDone;
-  const skipped = notDone.length - remaining.length;
+  const skipped = notDone.length - remaining.length + skippedFresh.size;
 
   console.log(`[${site}] Scraping ${remaining.length} remaining (${alreadyDone.size} already done, ${skipped} still fresh — skipped)...`);
 

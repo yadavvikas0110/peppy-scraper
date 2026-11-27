@@ -25,6 +25,7 @@ import { siteSupport, UnsupportedSitesError } from './config/transport-policy';
 import { withGroceryObs } from './grocery/grocery-obs';
 import { QUERIES } from '../scrape-master';
 import { customConfig, customStatus, stopCustomRun, triggerCustomRun } from './custom/custom.control';
+import { shoppingAuto } from './shopping/shopping-bulk.control';
 
 interceptConsole();
 
@@ -267,6 +268,24 @@ app.get('/api/config', (_req, res) => {
   });
 });
 
+// ─── Shopping bulk pipeline, 24/7 mode ────────────────────────────────────────
+// start: full pass over every enabled category × platform, wait SHOPPING_BULK_INTERVAL_HOURS, repeat until stop.
+// Body (all optional, otherwise SHOPPING_BULK_* env): { count, categories, platforms, categoryConcurrency,
+// productConcurrency, maxPages, freshHours, intervalHours }. Survives service restarts until stopped.
+app.post('/api/shopping/bulk/start', (req, res) => {
+  const r = shoppingAuto().start(req.body ?? {});
+  res.status(r.started ? 200 : 409).json(r);
+});
+
+app.post('/api/shopping/bulk/stop', (_req, res) => {
+  const r = shoppingAuto().stop();
+  res.status(r.stopped ? 200 : 409).json(r);
+});
+
+app.get('/api/shopping/bulk/status', (_req, res) => {
+  res.json(shoppingAuto().status());
+});
+
 // ─── Custom scraper (own transport, no third party) ───────────────────────────
 // Runs as a child process with its own lock/stop signal, so it never blocks or is blocked by
 // the Bright Data pipelines. Body: { sites?: string[], categories?: string[], limit?: number, push?: boolean }
@@ -460,10 +479,13 @@ server.listen(PORT, () => {
   console.log(`Bulk endpoint:      POST http://localhost:${PORT}/scrape-bulk`);
   console.log(`                         Body: { "sites": ["amazon","noon","carrefour","sharafdg"], "category": "...", "count": N }`);
   console.log(`                         (or "site": "amazon" for single-site backward compat)`);
+  console.log(`Shopping 24/7:      POST /api/shopping/bulk/start | POST /api/shopping/bulk/stop | GET /api/shopping/bulk/status`);
+  shoppingAuto().resume();
 });
 
 async function shutdown() {
   console.log('\nShutting down...');
+  await shoppingAuto().shutdown();
   await closeBrowser();
   server.close(() => process.exit(0));
 }

@@ -109,7 +109,7 @@ describe('platform lane: Scrape.do account and circuit-breaker errors', () => {
     assert.equal(out.errors.length, 0, 'nothing may land in checkpoint.failed — a resume would skip it forever');
     assert.equal(out.bundles.length, 0, 'an interrupted job publishes nothing');
 
-    const cp = loadCheckpoint(buildJobId(['amazon'], 'test phone', 8));
+    const cp = loadCheckpoint(buildJobId(['amazon'], 'test phone', 8), { now: new Date('2026-11-25T09:00:00.000Z') });
     assert.equal(cp?.scraped.length, 3);
 
     const resumed: string[] = [];
@@ -143,7 +143,7 @@ describe('platform lane: Scrape.do account and circuit-breaker errors', () => {
     assert.equal(r.status, 'partial', 'pending links mean the job is not complete');
     assert.equal(r.errors.length, 0);
     assert.ok(r.bundles.length >= 4, 'scraped products are still published');
-    assert.ok(loadCheckpoint(r.jobId), 'checkpoint kept so the next run scrapes only what is left');
+    assert.ok(loadCheckpoint(r.jobId, { now: new Date('2026-11-25T09:00:00.000Z') }), 'checkpoint kept so the next run scrapes only what is left');
   });
 
   test('jobStatusOf: pending makes a complete site partial', () => {
@@ -371,5 +371,64 @@ describe('helpers', () => {
     assert.throws(() => parseArgs(['--platforms', 'ebay']), /Unknown platform/);
     assert.throws(() => parseArgs(['--count', '0']), /--count/);
     assert.throws(() => parseArgs(['--bogus']), /Unknown option/);
+  });
+});
+
+describe('repeat runs do not pay again for fresh products', () => {
+  test('fresh index: recognises the same listing by id or canonical URL; stale and old offers are not fresh', async () => {
+    const { buildFreshIndex } = await import('../../src/shopping/shopping-fresh');
+    const cutoff = new Date('2026-11-25T00:00:00.000Z');
+    const idx = buildFreshIndex([
+      { retailers: [
+        { retailerId: 'amazon', productUrl: 'https://www.amazon.ae/dp/B0AAAAAA01?tag=x', externalId: 'B0AAAAAA01', lastSeenAt: new Date('2026-11-25T10:00:00Z') },
+        { retailerId: 'homecentre', productUrl: 'https://www.homecentre.com/ae/en/buy-x/p/168661612', lastSeenAt: new Date('2026-11-25T10:00:00Z') },
+        { retailerId: 'noon', productUrl: 'https://www.noon.com/uae-en/x/N1AAAAAA01/p/', lastSeenAt: new Date('2026-11-20T10:00:00Z') },
+        { retailerId: 'jumbo', productUrl: 'https://www.jumbo.ae/sony-tv-65.html', lastSeenAt: new Date('2026-11-25T10:00:00Z'), isStale: true },
+      ] },
+    ], cutoff);
+    assert.equal(idx.isFresh('amazon', 'https://www.amazon.ae/Some-Slug/dp/B0AAAAAA01/ref=sr_1'), true);
+    assert.equal(idx.isFresh('homecentre', 'https://www.homecentre.com/ae/en/buy-renamed-slug/p/168661612'), true);
+    assert.equal(idx.isFresh('noon', 'https://www.noon.com/uae-en/x/N1AAAAAA01/p/'), false, 'seen before the window');
+    assert.equal(idx.isFresh('jumbo', 'https://www.jumbo.ae/sony-tv-65.html'), false, 'stale offer');
+    assert.equal(idx.isFresh('carrefour', 'https://www.amazon.ae/dp/B0AAAAAA01'), false, 'other retailer');
+  });
+
+  test('fresh links on page 1 are skipped and pagination continues until enough new products are found', async () => {
+    const page1 = ['B0AAAAAA01', 'B0AAAAAA02', 'B0AAAAAA03'].map(a => `<a href="/dp/${a}">x</a>`).join('');
+    const page2 = ['B0AAAAAA03', 'B0BBBBBB01', 'B0BBBBBB02'].map(a => `<a href="/dp/${a}">x</a>`).join('');
+    const fetchedPages: string[] = [];
+    const scraped: string[] = [];
+    const fresh = new Set(['B0AAAAAA01', 'B0AAAAAA02', 'B0AAAAAA03']);
+    const r = await scrapeBulk({ ...job, count: 2 }, laneDeps({
+      discoverPastFresh: true,
+      shouldSkipUrl: (_s, url) => fresh.has(url.match(/dp\/(\w+)/)![1]),
+      fetchSearchHtml: async url => { fetchedPages.push(url); return /page=1$/.test(url) ? page1 : /page=2$/.test(url) ? page2 : ''; },
+      scrapeProduct: async url => { scraped.push(url); return pdp(url, `Phone ${url.slice(-2)} 128GB`, 1000); },
+    }));
+    assert.equal(fetchedPages.length, 2);
+    assert.deepEqual(scraped.map(u => u.slice(-10)).sort(), ['B0BBBBBB01', 'B0BBBBBB02']);
+    assert.equal(r.siteResults[0].skipped, 3);
+    assert.equal(r.status, 'complete');
+  });
+
+  test('everything fresh within the page limit: no product page is fetched and the site is complete', async () => {
+    let productCalls = 0;
+    const r = await scrapeBulk({ ...job, count: 5 }, laneDeps({
+      discoverPastFresh: true, maxListingPages: 2, shouldSkipUrl: () => true,
+      fetchSearchHtml: async url => (/page=(\d+)$/.exec(url)![1] === '1' ? AMAZON_LISTING : ASINS.map(a => `<a href="/dp/${a}X">x</a>`).join('')),
+      scrapeProduct: async url => { productCalls++; return pdp(url, 'x', 1); },
+    }));
+    assert.equal(productCalls, 0);
+    assert.equal(r.siteResults[0].status, 'complete');
+    assert.equal(r.siteResults[0].reason, 'all products still fresh');
+  });
+
+  test('the orchestrator passes the freshness check and the page cap to every lane', async () => {
+    const seen: any[] = [];
+    const { deps } = orchestratorDeps();
+    deps.scrapeBulk = (async (_o: any, d: any) => { seen.push([typeof d.shouldSkipUrl, d.discoverPastFresh, d.maxListingPages]); return fakeResult('a', 'complete', []); }) as any;
+    await runShoppingBulk({ categories: [cat('a')], isFresh: () => false, maxListingPages: 7 }, deps);
+    await runShoppingBulk({ categories: [cat('b')] }, deps);
+    assert.deepEqual(seen, [['function', true, 7], ['undefined', undefined, undefined]]);
   });
 });

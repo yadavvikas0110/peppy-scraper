@@ -77,6 +77,21 @@ Options: `--categories`, `--platforms`, `--count`, `--category-concurrency`, `--
 The scripts use `.env`. Writes go to `MONGODB_DB` / the database in `MONGODB_URI`; a production-named
 database is refused unless `CONFIRM_PRODUCTION_DB=yes`. Only one bulk run at a time (`output/shopping-bulk.lock`).
 
+## 24/7 mode from the API
+
+The scraper service (`npm run start:scraper`) runs the bulk pipeline continuously on request — every route needs
+the `x-api-key` header (`SCRAPER_API_KEY`):
+
+| Route | Effect |
+|---|---|
+| `POST /api/shopping/bulk/start` | full pass → wait `SHOPPING_BULK_INTERVAL_HOURS` → next pass … until stopped. Optional JSON body: `count`, `categories`, `platforms`, `categoryConcurrency`, `productConcurrency`, `maxPages`, `freshHours`, `intervalHours` (otherwise the `SHOPPING_BULK_*` env) |
+| `POST /api/shopping/bulk/stop` | no further passes; the pass in progress finishes its pages, saves checkpoints and exits |
+| `GET /api/shopping/bulk/status` | `phase` (idle / running / waiting / stopping), passes, current pass, next pass time, last outcome |
+
+The on/off switch is kept in `output/shopping-bulk.auto.json`, so a deploy or restart of the service resumes 24/7 mode
+until `stop` is called. Each pass is a child process with the same lock as the CLI, so do not also run
+`deploy/pm2.shopping-bulk.config.cjs` — use one or the other.
+
 ## Outcomes and resume
 
 Per category: `complete` (every page scraped and written), `partial` (some pages failed, a platform was

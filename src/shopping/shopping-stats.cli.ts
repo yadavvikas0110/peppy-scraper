@@ -42,9 +42,9 @@ export function platformStats(reports: BulkRunReport[]): Record<string, Platform
 function printReports(reports: Array<BulkRunReport & { file: string }>): void {
   for (const r of reports) {
     console.log(`\n■ ${r.file}  ${r.status.toUpperCase()}${r.dryRun ? ' (dry run)' : ''}  ${r.startedAt} → ${r.finishedAt}`);
-    console.log(`  ${pad('category', 18)} ${pad('status', 9)} ${pad('platform', 12)} ${padL('links', 6)} ${padL('ok', 5)} ${padL('fail', 5)} ${padL('pend', 5)}`);
+    console.log(`  ${pad('category', 18)} ${pad('status', 9)} ${pad('platform', 12)} ${padL('links', 6)} ${padL('ok', 5)} ${padL('fail', 5)} ${padL('pend', 5)} ${padL('fresh', 6)}`);
     for (const c of r.categories) {
-      c.siteResults.forEach((s, i) => console.log(`  ${pad(i ? '' : c.key, 18)} ${pad(i ? '' : c.status, 9)} ${pad(s.site, 12)} ${padL(s.links ?? '-', 6)} ${padL(s.scraped, 5)} ${padL(s.failed, 5)} ${padL(s.pending ?? 0, 5)}${s.status !== 'complete' ? `  ${s.status}` : ''}`));
+      c.siteResults.forEach((s, i) => console.log(`  ${pad(i ? '' : c.key, 18)} ${pad(i ? '' : c.status, 9)} ${pad(s.site, 12)} ${padL(s.links ?? '-', 6)} ${padL(s.scraped, 5)} ${padL(s.failed, 5)} ${padL(s.pending ?? 0, 5)} ${padL(s.skipped ?? 0, 6)}${s.status !== 'complete' ? `  ${s.status}` : ''}`));
       const w = c.push;
       console.log(`  ${pad('', 18)} → ${c.bundles} products, ${c.comparisons} on 2+ platforms` +
         (w ? `; DB: ${w.mongoInserted} new, ${w.mongoUpdated} updated, ${w.matchedExisting} merged into existing` : '') +

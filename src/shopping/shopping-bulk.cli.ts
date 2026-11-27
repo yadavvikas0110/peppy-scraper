@@ -83,16 +83,41 @@ export interface CliArgs {
   catalog: string;
   includeDisabled: boolean;
   list: boolean;
+  /** Skip products scraped within this many hours (0 = scrape everything again) */
+  freshHours: number;
+  maxPages: number;
 }
 
-export function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { categoryConcurrency: 2, productConcurrency: 3, dryRun: false, catalog: DEFAULT_CATALOG_FILE, includeDisabled: false, list: false };
-  const list = (v: string | undefined) => (v ?? '').split(',').map(s => s.trim()).filter(Boolean);
+/**
+ * Defaults come from the environment so a server can be tuned without changing its start command;
+ * command-line flags still win. Unset / empty variables fall back to the built-in default.
+ *
+ *   SHOPPING_BULK_FRESH_HOURS            skip products scraped within this many hours (default 24, 0 = rescrape all)
+ *   SHOPPING_BULK_COUNT                  products per platform per category (default: the catalog's count)
+ *   SHOPPING_BULK_MAX_PAGES              listing pages to look through per platform for new products (default 15)
+ *   SHOPPING_BULK_CATEGORY_CONCURRENCY   categories in parallel (default 2)
+ *   SHOPPING_BULK_PRODUCT_CONCURRENCY    product pages in parallel per platform (default 3)
+ */
+export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliArgs {
   const int = (name: string, v: string | undefined, min: number, max: number) => {
     const n = Number(v);
     if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${name} must be an integer ${min}–${max} (got "${v}")`);
     return n;
   };
+  const fromEnv = (name: string, fallback: number, min: number, max: number): number => {
+    const raw = env[name]?.trim();
+    return raw ? int(name, raw, min, max) : fallback;
+  };
+  const envCount = env.SHOPPING_BULK_COUNT?.trim() ? fromEnv('SHOPPING_BULK_COUNT', 0, 1, 500) : undefined;
+  const args: CliArgs = {
+    count: envCount,
+    categoryConcurrency: fromEnv('SHOPPING_BULK_CATEGORY_CONCURRENCY', 2, 1, 10),
+    productConcurrency: fromEnv('SHOPPING_BULK_PRODUCT_CONCURRENCY', 3, 1, 20),
+    dryRun: false, catalog: DEFAULT_CATALOG_FILE, includeDisabled: false, list: false,
+    freshHours: fromEnv('SHOPPING_BULK_FRESH_HOURS', 24, 0, 24 * 30),
+    maxPages: fromEnv('SHOPPING_BULK_MAX_PAGES', 15, 1, 200),
+  };
+  const list = (v: string | undefined) => (v ?? '').split(',').map(s => s.trim()).filter(Boolean);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const val = () => argv[++i];
@@ -112,6 +137,8 @@ export function parseArgs(argv: string[]): CliArgs {
       case '--catalog': args.catalog = val(); break;
       case '--include-disabled': args.includeDisabled = true; break;
       case '--list': args.list = true; break;
+      case '--fresh-hours': args.freshHours = int('--fresh-hours', val(), 0, 24 * 30); break;
+      case '--max-pages': args.maxPages = int('--max-pages', val(), 1, 200); break;
       default: throw new Error(`Unknown option ${a}`);
     }
   }
@@ -163,6 +190,21 @@ async function main(): Promise<number> {
     push = (bundles: Parameters<typeof pushToDatabase>[0]) => pushToDatabase(bundles, { isOwnImage: isOwnS3Url });
   }
 
+  // Products observed recently are not paid for again; pagination goes deeper for new ones instead
+  let isFresh: ((site: SiteKey, url: string) => boolean) | undefined;
+  if (args.freshHours > 0) {
+    try {
+      const { loadFreshIndex } = await import('./shopping-fresh');
+      const index = await loadFreshIndex((await getMongoDb()).collection('products_clean'), args.freshHours);
+      isFresh = index.isFresh;
+      console.log(`[bulk] Skipping products scraped in the last ${args.freshHours} h (${index.size} offer keys); up to ${args.maxPages} listing pages per platform to find new ones`);
+    } catch (e: any) {
+      console.warn(`[bulk] Freshness check unavailable (${e?.message ?? e}) — every product found will be scraped`);
+    }
+  } else {
+    console.log('[bulk] --fresh-hours 0: every product found is scraped again (price refresh of everything)');
+  }
+
   if (!acquireLock('shopping-bulk', SHOPPING_BULK_LOCK_FILE)) return 2;
   clearStopSignal(SHOPPING_BULK_STOP_FILE);
   let interrupted = 0;
@@ -181,6 +223,8 @@ async function main(): Promise<number> {
       productConcurrency: args.productConcurrency,
       countPerPlatform: args.count,
       dryRun: args.dryRun,
+      isFresh,
+      maxListingPages: args.maxPages,
     }, {
       scrapeBulk,
       bulkDeps: defaultBulkScrapeDeps,
@@ -193,7 +237,7 @@ async function main(): Promise<number> {
       scrapeDoUsage: () => ({ ...scrapeDoUsage(), images: scrapeDoImageUsage }),
     });
     // PM2 (24/7 mode) sets pm_id; a run started by hand is "manual"
-    await storeStats(report, process.env.pm_id !== undefined ? 'cron' : 'manual');
+    await storeStats(report, process.env.pm_id !== undefined || process.env.SHOPPING_BULK_TRIGGER === 'cron' ? 'cron' : 'manual');
     return report.status === 'complete' || report.status === 'partial' ? 0 : report.status === 'stopped' ? 3 : 1;
   } finally {
     releaseLock(SHOPPING_BULK_LOCK_FILE);
